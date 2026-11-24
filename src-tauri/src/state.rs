@@ -111,7 +111,7 @@ impl Default for SettingsState {
 
 /// Keep the user's folders out of the log, before anything logs one.
 pub(crate) fn register_redactions(settings: &Settings) {
-    crate::redact::register_settings(
+    vinciskin_core::redact::register_settings(
         settings.config.league_path.as_deref(),
         settings.config.mod_storage_path.as_deref(),
         settings.config.workshop_path.as_deref(),

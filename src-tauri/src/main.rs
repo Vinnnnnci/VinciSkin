@@ -19,7 +19,6 @@ mod mods;
 mod patcher;
 mod pengu;
 mod protocol;
-mod redact;
 mod setup;
 mod startup;
 mod state;
@@ -235,6 +234,9 @@ fn main() {
             commands::stop_cn_auto_swap,
             commands::get_cn_auto_status,
             commands::restore_cn_client,
+            // Support report (what a user sends instead of four separate files)
+            commands::build_support_report,
+            commands::save_support_report,
             // for dynamic icons
             tray::set_tray_state,
         ]))

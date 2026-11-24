@@ -32,9 +32,6 @@ const OVERLAY_VERBOSE: &str = "ltk_overlay=debug";
 /// The identifier the installer and the log directory use.
 const IDENTIFIER: &str = "com.vinciskin.app";
 
-/// The build at which Windows reports itself as Windows 11.
-const WINDOWS_11_BUILD: u32 = 22_000;
-
 /// Everything the log directory may hold before the oldest files go.
 const MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 
@@ -339,7 +336,7 @@ fn register_environment_paths() {
         ("LOCALAPPDATA", "%LOCALAPPDATA%"),
     ] {
         if let Some(value) = std::env::var_os(name) {
-            crate::redact::register(&value.to_string_lossy(), placeholder);
+            vinciskin_core::redact::register(&value.to_string_lossy(), placeholder);
         }
     }
 }
@@ -380,7 +377,7 @@ fn log_environment() {
 
         tracing::info!(
             os = %format!("{major}.{minor}.{build}"),
-            windows = windows_name(build),
+            windows = vinciskin_core::diagnostics::windows::windows_name(build),
             arch = std::env::consts::ARCH,
             webview2,
             "environment"
@@ -421,16 +418,6 @@ fn os_version() -> (u32, u32, u32) {
     }
 }
 
-/// The Windows name a build number belongs to.
-#[cfg(target_os = "windows")]
-fn windows_name(build: u32) -> &'static str {
-    if build >= WINDOWS_11_BUILD {
-        "Windows 11"
-    } else {
-        "Windows 10"
-    }
-}
-
 /// The Evergreen WebView2 runtime's version, as the diagnostics read it too.
 #[cfg(target_os = "windows")]
 fn webview2_version() -> Option<String> {
@@ -458,7 +445,7 @@ fn install_panic_hook(log_dir: Option<PathBuf>) {
                 .append(true)
                 .open(dir.join("panic.log"))
                 .and_then(|mut file| {
-                    file.write_all(crate::redact::line(&line).as_bytes())?;
+                    file.write_all(vinciskin_core::redact::text(&line).as_bytes())?;
                     file.flush()
                 });
         }
@@ -536,7 +523,7 @@ mod boot {
             .append(true)
             .open(path)
             .and_then(|mut file| {
-                file.write_all(crate::redact::line(&entry).as_bytes())?;
+                file.write_all(vinciskin_core::redact::text(&entry).as_bytes())?;
                 file.flush()
             });
     }

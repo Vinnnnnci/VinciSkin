@@ -9,8 +9,10 @@
 //! query. Both run at the writer, so every line is covered and no call site has to remember.
 
 use std::borrow::Cow;
-use std::sync::{OnceLock, RwLock};
+use std::collections::BTreeMap;
+use std::sync::{LazyLock, OnceLock};
 
+use parking_lot::{Mutex, RwLock};
 use regex::Regex;
 
 /// One registered value, and the placeholder that stands for it.
@@ -22,8 +24,17 @@ struct Known {
 /// The registered values, longest first so a nested path wins over the folder it sits in.
 static KNOWN: RwLock<Vec<Known>> = RwLock::new(Vec::new());
 
+/// What each rule has replaced since the process started, as `manifest.json` reports it.
+static COUNTS: LazyLock<Mutex<BTreeMap<String, u64>>> = LazyLock::new(Default::default);
+
 /// The shortest value worth registering, below which a replacement would redact too much.
 const MIN_KNOWN_LEN: usize = 4;
+
+/// The placeholder the profile-path pattern writes.
+const PROFILE: &str = "%USERPROFILE%";
+
+/// The rule name a stripped URL query is counted under.
+const URL_QUERY: &str = "url-query";
 
 /// Register `value` to be written as `placeholder` wherever it appears.
 ///
@@ -38,9 +49,7 @@ pub fn register(value: &str, placeholder: &'static str) {
 
     let escaped = value.replace('\\', "\\\\");
 
-    let Ok(mut known) = KNOWN.write() else {
-        return;
-    };
+    let mut known = KNOWN.write();
 
     for spelling in [value.to_owned(), escaped] {
         known.retain(|entry| entry.value != spelling);
@@ -77,19 +86,15 @@ pub fn register_settings(
 
 /// `text` with every registered value and every known pattern replaced.
 #[must_use]
-pub fn line(text: &str) -> Cow<'_, str> {
+pub fn text(text: &str) -> Cow<'_, str> {
     if !is_private(text) {
         return Cow::Borrowed(text);
     }
 
     let mut out = apply_known(text);
-    out = profile_path()
-        .replace_all(&out, "%USERPROFILE%")
-        .into_owned();
-    out = url_pattern()
-        .replace_all(&out, |caps: &regex::Captures<'_>| url(&caps[0]).to_owned())
-        .into_owned();
-    out = email().replace_all(&out, "<email>").into_owned();
+    out = apply_profile_paths(out);
+    out = apply_urls(out);
+    out = apply_email(out);
 
     Cow::Owned(out)
 }
@@ -104,15 +109,29 @@ pub fn url(url: &str) -> &str {
     &url[..end]
 }
 
+/// How many replacements each rule has made since the process started.
+#[must_use]
+pub fn counts() -> BTreeMap<String, u64> {
+    COUNTS.lock().clone()
+}
+
+/// Add `times` to the tally of `rule`.
+fn count(rule: &str, times: u64) {
+    if times == 0 {
+        return;
+    }
+
+    *COUNTS.lock().entry(rule.to_owned()).or_default() += times;
+}
+
 /// Whether `text` holds anything the patterns or the registry would change.
 fn is_private(text: &str) -> bool {
-    if let Ok(known) = KNOWN.read() {
-        if known
-            .iter()
-            .any(|entry| text.contains(entry.value.as_str()))
-        {
-            return true;
-        }
+    if KNOWN
+        .read()
+        .iter()
+        .any(|entry| text.contains(entry.value.as_str()))
+    {
+        return true;
     }
 
     if profile_path().is_match(text) || email().is_match(text) {
@@ -128,17 +147,56 @@ fn is_private(text: &str) -> bool {
 fn apply_known(text: &str) -> String {
     let mut out = text.to_owned();
 
-    let Ok(known) = KNOWN.read() else {
-        return out;
-    };
+    let known = KNOWN.read();
 
     for entry in known.iter() {
-        if out.contains(entry.value.as_str()) {
+        let hits = out.matches(entry.value.as_str()).count() as u64;
+        if hits > 0 {
             out = out.replace(entry.value.as_str(), entry.placeholder);
+            count(entry.placeholder, hits);
         }
     }
 
     out
+}
+
+/// `text` with every profile path replaced by its placeholder.
+fn apply_profile_paths(text: String) -> String {
+    let hits = profile_path().find_iter(&text).count() as u64;
+    if hits == 0 {
+        return text;
+    }
+
+    count(PROFILE, hits);
+    profile_path().replace_all(&text, PROFILE).into_owned()
+}
+
+/// `text` with every URL's query and fragment removed.
+fn apply_urls(text: String) -> String {
+    let mut stripped = 0u64;
+
+    let out = url_pattern().replace_all(&text, |captures: &regex::Captures<'_>| {
+        let address = url(&captures[0]);
+        if address.len() < captures[0].len() {
+            stripped += 1;
+        }
+
+        address.to_owned()
+    });
+
+    count(URL_QUERY, stripped);
+    out.into_owned()
+}
+
+/// `text` with every address replaced.
+fn apply_email(text: String) -> String {
+    let hits = email().find_iter(&text).count() as u64;
+    if hits == 0 {
+        return text;
+    }
+
+    count("<email>", hits);
+    email().replace_all(&text, "<email>").into_owned()
 }
 
 /// Every `C:\Users\<name>` and `C:\\Users\\<name>`, whichever account it names.

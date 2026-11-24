@@ -45,7 +45,7 @@ impl<W: Write> Write for RedactingWriter<W> {
         {
             let line = String::from_utf8_lossy(&self.pending[written..end]).into_owned();
             self.inner
-                .write_all(crate::redact::line(&line).as_bytes())?;
+                .write_all(vinciskin_core::redact::text(&line).as_bytes())?;
             written = end;
         }
         self.pending.drain(..written);
@@ -57,7 +57,7 @@ impl<W: Write> Write for RedactingWriter<W> {
         if !self.pending.is_empty() {
             let line = String::from_utf8_lossy(&self.pending).into_owned();
             self.inner
-                .write_all(crate::redact::line(&line).as_bytes())?;
+                .write_all(vinciskin_core::redact::text(&line).as_bytes())?;
             self.pending.clear();
         }
 

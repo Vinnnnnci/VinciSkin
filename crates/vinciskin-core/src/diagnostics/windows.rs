@@ -12,8 +12,35 @@ use super::{CheckDetail, check_ok};
 const MIN_OK_BUILD: u32 = 19045;
 #[cfg(target_os = "windows")]
 const KNOWN_BAD_BUILD: u32 = 22000;
-#[cfg(target_os = "windows")]
+
+/// The build at which Windows reports itself as Windows 11.
 const WINDOWS_11_BUILD: u32 = 22000;
+
+/// The Windows name a build number belongs to.
+#[must_use]
+pub fn windows_name(build: u32) -> &'static str {
+    if build >= WINDOWS_11_BUILD {
+        "Windows 11"
+    } else {
+        "Windows 10"
+    }
+}
+
+/// The system as a person reads it, `Windows 11 (build 26200)`.
+#[must_use]
+pub fn describe_os() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let (_, _, build) = read_kuser_version();
+
+        format!("{} (build {build})", windows_name(build))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::consts::OS.to_owned()
+    }
+}
 
 /// The oldest WebView2 major the frontend's build target runs on.
 const MIN_WEBVIEW2_MAJOR: u32 = 105;
@@ -48,12 +75,7 @@ fn read_kuser_version() -> (u32, u32, u32) {
 #[cfg(target_os = "windows")]
 pub fn check_version() -> Check {
     let (major, minor, build) = read_kuser_version();
-    let name = if build >= WINDOWS_11_BUILD {
-        "Windows 11"
-    } else {
-        "Windows 10"
-    };
-    let display = format!("{name} (build {build})");
+    let display = format!("{} (build {build})", windows_name(build));
     if build < MIN_OK_BUILD || build == KNOWN_BAD_BUILD {
         let mut c = check(
             "windows.version",

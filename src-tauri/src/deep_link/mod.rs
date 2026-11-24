@@ -337,7 +337,7 @@ fn describe(request: &DeepLinkRequest) -> String {
     match request {
         DeepLinkRequest::Install(install) => format!(
             "install url={} name={:?} author={:?} source={:?}",
-            crate::redact::url(&install.url),
+            vinciskin_core::redact::url(&install.url),
             install.name,
             install.author,
             install.source,
@@ -356,13 +356,16 @@ fn raise_main_window(app_handle: &tauri::AppHandle) {
 }
 
 fn handle_single(app_handle: &tauri::AppHandle, raw_url: &str) {
-    tracing::info!("Received deep-link: {}", crate::redact::url(raw_url));
+    tracing::info!(
+        "Received deep-link: {}",
+        vinciskin_core::redact::url(raw_url)
+    );
 
     let deep_link_state: tauri::State<'_, DeepLinkState> = app_handle.state();
     if deep_link_state.should_rate_limit() {
         tracing::warn!(
             "Deep-link rate-limited, ignoring: {}",
-            crate::redact::url(raw_url)
+            vinciskin_core::redact::url(raw_url)
         );
         return;
     }

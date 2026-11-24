@@ -105,7 +105,7 @@ fn a_day_past_the_cap_rotates_and_starts_a_second_file() {
 #[test]
 fn a_line_split_across_writes_is_redacted_once_it_is_whole() {
     const SPLIT: &str = r"C:\Tools\log-split-showcase";
-    crate::redact::register(SPLIT, "%SPLIT%");
+    vinciskin_core::redact::register(SPLIT, "%SPLIT%");
 
     let scratch = Scratch::new();
     let mut writer = RedactingWriter::new(DailyFile::new(scratch.path()));

@@ -25,7 +25,7 @@ pub mod report;
 mod storage_medium;
 pub mod store;
 pub mod token;
-pub(crate) mod windows;
+pub mod windows;
 
 #[cfg(target_os = "windows")]
 pub(crate) mod win_util;
@@ -225,6 +225,9 @@ pub fn run_all(ctx: &CheckCtx) -> Vec<Check> {
     vec![
         // System
         windows::check_version(),
+        windows::check_arch(),
+        windows::check_webview2(),
+        windows::check_dotnet_framework(),
         windows::check_long_paths_enabled(),
         windows::check_uac_enabled(),
         // Manager

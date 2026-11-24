@@ -4,7 +4,7 @@
 use super::{Category, Check, Severity, check};
 
 #[cfg(target_os = "windows")]
-use super::win_util::{HKLM, reg_read_num};
+use super::win_util::{HKCU, HKLM, reg_read_num, reg_read_str};
 #[cfg(target_os = "windows")]
 use super::{CheckDetail, check_ok};
 
@@ -14,6 +14,22 @@ const MIN_OK_BUILD: u32 = 19045;
 const KNOWN_BAD_BUILD: u32 = 22000;
 #[cfg(target_os = "windows")]
 const WINDOWS_11_BUILD: u32 = 22000;
+
+/// The oldest WebView2 major the frontend's build target runs on.
+const MIN_WEBVIEW2_MAJOR: u32 = 105;
+
+/// Whether `version` is older than the frontend's build target.
+///
+/// A version that does not parse is answered `false`: a runtime that reported something is not
+/// the failure a missing one is.
+#[must_use]
+pub fn webview2_too_old(version: &str) -> bool {
+    version
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u32>().ok())
+        .is_some_and(|major| major < MIN_WEBVIEW2_MAJOR)
+}
 
 /// Read OS major/minor/build from the kernel-shared user data page (KUSER_SHARED_DATA).
 /// This avoids `GetVersionExW` lying when the manager isn't manifested for the current OS.
@@ -164,3 +180,168 @@ pub fn check_uac_enabled() -> Check {
         "Not applicable",
     )
 }
+
+/// The Evergreen WebView2 runtime's version, from the registry key either install writes.
+///
+/// The machine-wide key is the 32-bit view, because that is where the runtime's own installer
+/// writes it. The per-user key is the fallback, for a runtime a user installed without admin.
+#[cfg(target_os = "windows")]
+pub fn webview2_version() -> Option<String> {
+    const MACHINE_KEY: &str =
+        r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    const USER_KEY: &str =
+        r"Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+
+    reg_read_str(HKLM, MACHINE_KEY, "pv").or_else(|| reg_read_str(HKCU, USER_KEY, "pv"))
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn webview2_version() -> Option<String> {
+    None
+}
+
+/// The WebView2 runtime, which this app cannot draw a window without.
+#[cfg(target_os = "windows")]
+pub fn check_webview2() -> Check {
+    let Some(version) = webview2_version() else {
+        let mut c = check(
+            "windows.webview2",
+            "WebView2 runtime",
+            Category::System,
+            Severity::Bad,
+            "Missing — the window cannot be drawn",
+        );
+        c.suggestion = Some(
+            "VinciSkin draws its window with the WebView2 runtime, which Windows 11 ships and Windows 10 often does not. Install the Evergreen runtime from Microsoft's page, then start VinciSkin again."
+                .into(),
+        );
+        return c;
+    };
+
+    let major = version
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    if webview2_too_old(&version) {
+        let mut c = check(
+            "windows.webview2",
+            "WebView2 runtime",
+            Category::System,
+            Severity::Warn,
+            format!("{version} — older than the app's build target"),
+        );
+        c.suggestion = Some(
+            "The runtime is older than the Chromium build VinciSkin's frontend targets, so pages may fail to render. Windows Update or the Evergreen installer brings it up to date."
+                .into(),
+        );
+        c
+    } else {
+        let mut c = check_ok(
+            "windows.webview2",
+            "WebView2 runtime",
+            Category::System,
+            &version,
+        );
+        c.details.push(CheckDetail::new("build", major.to_string()));
+        c
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn check_webview2() -> Check {
+    check(
+        "windows.webview2",
+        "WebView2 runtime",
+        Category::System,
+        Severity::Info,
+        "Not applicable",
+    )
+}
+
+/// Whether this build of the app is 64-bit, which the injection loader requires.
+pub fn check_arch() -> Check {
+    let arch = std::env::consts::ARCH;
+
+    if arch == "x86" {
+        let mut c = check(
+            "system.arch",
+            "Architecture",
+            Category::System,
+            Severity::Bad,
+            "32-bit — the injection loader is 64-bit only",
+        );
+        c.suggestion = Some(
+            "Install the 64-bit build of VinciSkin. League, the loader and the overlay all run in one 64-bit process, which a 32-bit manager cannot reach."
+                .into(),
+        );
+        return c;
+    }
+
+    check_ok("system.arch", "Architecture", Category::System, arch)
+}
+
+/// The .NET Framework release number at which 4.8 starts.
+#[cfg(target_os = "windows")]
+const NET48_RELEASE: u64 = 528_040;
+
+/// The .NET Framework the Chinese client's anti-cheat component loads.
+#[cfg(target_os = "windows")]
+pub fn check_dotnet_framework() -> Check {
+    const KEY: &str = "SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full";
+
+    let release = reg_read_num(HKLM, KEY, "Release")
+        .or_else(|| reg_read_num(HKLM, &format!("SOFTWARE\\WOW6432Node\\{KEY}"), "Release"));
+
+    match release {
+        Some(release) if release >= NET48_RELEASE => check_ok(
+            "system.dotnet_framework",
+            ".NET Framework",
+            Category::System,
+            "4.8",
+        ),
+        Some(release) => {
+            let mut c = check(
+                "system.dotnet_framework",
+                ".NET Framework",
+                Category::System,
+                Severity::Warn,
+                format!("4.x (release {release}) — older than 4.8"),
+            );
+            c.suggestion = Some(
+                "The Chinese client starts League through a component that needs .NET Framework 4.8. Windows Update offers it on Windows 10 1903 and later."
+                    .into(),
+            );
+            c
+        }
+        None => {
+            let mut c = check(
+                "system.dotnet_framework",
+                ".NET Framework",
+                Category::System,
+                Severity::Warn,
+                "Not installed",
+            );
+            c.suggestion = Some(
+                "The Chinese client starts League through a component that needs .NET Framework 4.8. Windows Update offers it on Windows 10 1903 and later."
+                    .into(),
+            );
+            c
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn check_dotnet_framework() -> Check {
+    check(
+        "system.dotnet_framework",
+        ".NET Framework",
+        Category::System,
+        Severity::Info,
+        "Not applicable",
+    )
+}
+
+#[cfg(test)]
+mod tests;

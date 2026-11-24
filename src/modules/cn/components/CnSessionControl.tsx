@@ -6,14 +6,19 @@ import { api, type CnAutoStatus, type CnPatcherStatus, isOk, unwrap } from "@/li
 
 /** What the loader is doing, as the words a reader sees. */
 function injectLabel(status: CnPatcherStatus | null): string {
-  if (!status?.running) return m.cn_inject_idle_label();
-  return status.state === "injected" ? m.cn_inject_injected_label() : m.cn_inject_scanning_label();
+  if (!status) return m.cn_inject_idle_label();
+  if (status.error) return m.cn_inject_error_label({ detail: status.error });
+  if (!status.running) return m.cn_inject_idle_label();
+  if (status.state === "injected") return m.cn_inject_injected_label();
+  if (status.state === "attached") return m.cn_inject_attached_label();
+  return m.cn_inject_scanning_label();
 }
 
 /** What the champ-select watcher is doing. */
 function followLabel(status: CnAutoStatus | null): string {
   if (!status?.running) return m.cn_auto_off_label();
   if (status.error) return m.cn_auto_error_label({ detail: status.error });
+  if (status.needsClientRestart) return m.cn_auto_restart_label();
   if (!status.applied) return m.cn_auto_waiting_label();
   return m.cn_auto_applied_label({ name: status.applied.character });
 }
@@ -60,10 +65,10 @@ export function CnSessionControl() {
     try {
       if (injectRunning) {
         unwrap(await api.cn.stopPatcher());
-        setPatcher({ running: false, state: null, error: null });
+        setPatcher({ running: false, state: null, error: null, logPath: null, gameRunning: false });
       } else {
         unwrap(await api.cn.startPatcher());
-        setPatcher({ running: true, state: null, error: null });
+        setPatcher({ running: true, state: null, error: null, logPath: null, gameRunning: false });
       }
     } catch (error: unknown) {
       const title = injectRunning ? m.cn_inject_stop_failed_title() : m.cn_inject_failed_title();
@@ -78,10 +83,44 @@ export function CnSessionControl() {
     try {
       if (skinRunning) {
         unwrap(await api.cn.stopAutoSwap());
-        setAuto({ running: false, currentChampion: null, applied: null, error: null });
+        setAuto({
+          running: false,
+          currentChampion: null,
+          applied: null,
+          error: null,
+          needsClientRestart: false,
+        });
       } else {
+        /* The follow has nothing to show without the host, so turning it on
+           starts the host first. A host already up answers with its own
+           "already running" error, which is not a failure here. */
+        if (!injectRunning) {
+          try {
+            unwrap(await api.cn.startPatcher());
+            setPatcher({
+              running: true,
+              state: null,
+              error: null,
+              logPath: null,
+              gameRunning: false,
+            });
+          } catch (error: unknown) {
+            const detail = errorMessage(error);
+            if (!detail.includes("the patcher is already running")) {
+              toast.error(m.cn_inject_failed_title(), detail);
+              return;
+            }
+          }
+        }
+
         unwrap(await api.cn.startAutoSwap());
-        setAuto({ running: true, currentChampion: null, applied: null, error: null });
+        setAuto({
+          running: true,
+          currentChampion: null,
+          applied: null,
+          error: null,
+          needsClientRestart: false,
+        });
       }
     } catch (error: unknown) {
       const title = skinRunning ? m.cn_auto_stop_failed_title() : m.cn_auto_failed_title();

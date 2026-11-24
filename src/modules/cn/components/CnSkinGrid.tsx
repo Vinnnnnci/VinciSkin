@@ -1,6 +1,13 @@
 import { AlertBox, Button, EmptyState, Spinner, useConfirm, useToast } from "@/components";
-import { describeError, errorSummary, m } from "@/i18n";
-import type { ChampionSwap, CnHero, CnQuality, CnSkin } from "@/lib/tauri";
+import { describeError, errorMessage, errorSummary, m } from "@/i18n";
+import {
+  api,
+  isOk,
+  type ChampionSwap,
+  type CnHero,
+  type CnQuality,
+  type CnSkin,
+} from "@/lib/tauri";
 
 import {
   useApplyCnSkin,
@@ -38,6 +45,53 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
      restore, so the cards stay shut until the record is let go of. */
   const blocked = swap?.state === "drifted" || swap?.state === "backupMissing";
 
+  async function announceApply(name: string) {
+    const status = await api.cn.patcherStatus();
+
+    if (!isOk(status)) {
+      toast.warning(
+        m.cn_skin_applied_injection_off_title(),
+        m.cn_skin_applied_injection_off_description(),
+      );
+      return;
+    }
+
+    if (status.value.error) {
+      toast.error(m.cn_inject_failed_title(), status.value.error);
+      return;
+    }
+
+    if (status.value.gameRunning) {
+      toast.warning(
+        m.cn_skin_applied_game_running_title(),
+        m.cn_skin_applied_game_running_description(),
+      );
+      return;
+    }
+
+    if (!status.value.running) {
+      toast.toast({
+        title: m.cn_skin_applied_injection_off_title(),
+        description: m.cn_skin_applied_injection_off_description(),
+        type: "warning",
+        timeout: 8000,
+        action: {
+          label: m.cn_inject_start_action(),
+          onClick: () => {
+            void api.cn.startPatcher().then((result) => {
+              if (!isOk(result)) {
+                toast.error(m.cn_inject_failed_title(), errorMessage(result.error));
+              }
+            });
+          },
+        },
+      });
+      return;
+    }
+
+    toast.success(m.cn_skin_applied({ name }));
+  }
+
   async function pick(picked: CnSkin) {
     if (hero === null) return;
 
@@ -67,7 +121,9 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
     apply.mutate(
       { alias: hero.alias, heroId: picked.heroId, skinId: picked.skinId },
       {
-        onSuccess: () => toast.success(m.cn_skin_applied({ name: picked.name })),
+        onSuccess: () => {
+          void announceApply(picked.name);
+        },
         onError: (error) => toast.error(m.cn_apply_skin_failed_title(), errorSummary(error)),
       },
     );

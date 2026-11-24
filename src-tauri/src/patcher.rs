@@ -10,6 +10,10 @@
 //! level cannot hook the game (`Win32=5`). The process handle is kept so the
 //! session can be stopped again, which a lower-integrity process could not do
 //! with a fresh handle.
+//!
+//! The loader's console is hidden, so its output is redirected to a log file.
+//! `status` reads that file and only reports `injected` once the DLL says its
+//! initialization entry was reached.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,6 +32,9 @@ pub const LOADER_DLL_NAME: &str = "cslol-dll-legacy.dll";
 /// The loader pair, embedded so a release build is one file.
 const EMBEDDED_LOADER_EXE: &[u8] = include_bytes!("../resources/cslol-inj.exe");
 const EMBEDDED_LOADER_DLL: &[u8] = include_bytes!("../resources/cslol-dll-legacy.dll");
+
+/// The longest loader line a status carries.
+const MAX_LOADER_ERROR: usize = 400;
 
 /// Write the embedded loader into `dir`, answering the host's path.
 ///
@@ -59,16 +66,26 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> AppResult<()> {
 pub struct PatcherStatus {
     /// Whether the loader process is alive.
     pub running: bool,
-    /// What the session is doing, when there is one.
+    /// `scanning`, `attached`, `injected` or `failed`, when there is a session.
     pub state: Option<String>,
-    /// The last failure, when there was one.
+    /// The last failure the loader reported.
     pub error: Option<String>,
+    /// The log the loader writes, when a session has started.
+    pub log_path: Option<String>,
+    /// Whether the game process is up now.
+    pub game_running: bool,
 }
 
 /// A process handle, kept so the session can be stopped again.
+///
+/// The job is what makes a stop reach the loader: the process is the hidden
+/// `cmd` wrapper, and the loader is its child.
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Copy)]
-struct Handle(isize);
+struct Handle {
+    process: isize,
+    job: isize,
+}
 
 // SAFETY: the value is an opaque Windows handle, only ever used through the
 // Win32 calls that take it.
@@ -79,13 +96,18 @@ mod elevated {
     use super::{AppError, AppResult, Handle};
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, TerminateProcess};
-
-    /// The exit code a process still running reports (`STILL_ACTIVE`).
-    const STILL_ACTIVE: u32 = 259;
     use windows_sys::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
+
+    /// The exit code a process still running reports (`STILL_ACTIVE`).
+    const STILL_ACTIVE: u32 = 259;
 
     fn wide(text: &str) -> Vec<u16> {
         std::ffi::OsStr::new(text)
@@ -108,10 +130,8 @@ mod elevated {
         info.lpVerb = verb.as_ptr();
         info.lpFile = file.as_ptr();
         info.lpParameters = params.as_ptr();
-        /* `SW_HIDE`: the loader is a console program, so a normal show opens a
-        black window over the game. Its console is never read — the session's
-        state comes from the game's own process, not the loader's stdout — so
-        hiding the window costs nothing. */
+        /* `SW_HIDE`: the loader writes its diagnostics to the redirected log,
+        so its console is never shown. */
         info.nShow = 0;
 
         // SAFETY: `info` is a fully initialized SHELLEXECUTEINFOW.
@@ -127,24 +147,66 @@ mod elevated {
                 "the loader started but gave no process handle".into(),
             ));
         }
-        Ok(Handle(info.hProcess as isize))
+
+        let job = attach_job(info.hProcess as HANDLE);
+
+        Ok(Handle {
+            process: info.hProcess as isize,
+            job: job as isize,
+        })
+    }
+
+    /// Put the wrapper in a job that ends its children when it is terminated.
+    fn attach_job(process: HANDLE) -> HANDLE {
+        // SAFETY: the job is created here, configured with a struct of the size
+        // the call declares, and closed when it cannot hold the process.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                tracing::warn!("could not create a job for the injection loader");
+                return std::ptr::null_mut();
+            }
+
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+            let configured = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const _,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) != 0;
+            let assigned = configured && AssignProcessToJobObject(job, process) != 0;
+
+            if !assigned {
+                tracing::warn!("could not put the injection loader in a job");
+                CloseHandle(job);
+                return std::ptr::null_mut();
+            }
+
+            job
+        }
     }
 
     /// Whether the process behind `handle` is still running.
     pub fn alive(handle: Handle) -> bool {
         let mut code: u32 = 0;
         // SAFETY: `handle` is a live process handle.
-        let ok = unsafe { GetExitCodeProcess(handle.0 as HANDLE, &mut code) };
+        let ok = unsafe { GetExitCodeProcess(handle.process as HANDLE, &mut code) };
         ok != 0 && code == STILL_ACTIVE as u32
     }
 
-    /// Stop the process behind `handle`.
+    /// Stop the process behind `handle`, and its children.
     pub fn kill(handle: Handle) {
-        // SAFETY: `handle` is a live process handle with terminate access, which
-        // is what `ShellExecuteExW` hands back.
+        // SAFETY: the process and job handles are live, and are closed once.
         unsafe {
-            TerminateProcess(handle.0 as HANDLE, 0);
-            CloseHandle(handle.0 as HANDLE);
+            if handle.job != 0 {
+                TerminateJobObject(handle.job as HANDLE, 0);
+                CloseHandle(handle.job as HANDLE);
+            } else {
+                TerminateProcess(handle.process as HANDLE, 0);
+            }
+            CloseHandle(handle.process as HANDLE);
         }
     }
 }
@@ -164,7 +226,7 @@ mod elevated {
     pub fn kill(_handle: Handle) {}
 }
 
-/// The game the loader waits for.
+/// The processes the loader waits for and the one it is.
 #[cfg(windows)]
 mod probe {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -172,6 +234,7 @@ mod probe {
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 
     /// The game the loader hooks, as the process list names it.
     const GAME: &str = "League of Legends.exe";
@@ -187,6 +250,25 @@ mod probe {
     /// second one beside it would hook the game twice.
     pub fn loader_pid() -> Option<u32> {
         find(super::LOADER_EXE_NAME)
+    }
+
+    /// End the loader, which a `cmd` wrapper's handle does not reach.
+    pub fn kill_loader() -> bool {
+        let Some(pid) = loader_pid() else {
+            return false;
+        };
+
+        // SAFETY: the handle is closed before returning, and only used through
+        // the two Win32 calls that accept it.
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let killed = TerminateProcess(handle, 0) != 0;
+            CloseHandle(handle);
+            killed
+        }
     }
 
     /// The first process whose executable name is `name`.
@@ -236,11 +318,21 @@ mod probe {
     pub fn loader_pid() -> Option<u32> {
         None
     }
+
+    pub fn kill_loader() -> bool {
+        false
+    }
 }
 
+/// What one loader run has read from its log.
 struct Inner {
     handle: Option<Handle>,
     status: PatcherStatus,
+    log_path: Option<PathBuf>,
+    log_offset: u64,
+    log_pending: String,
+    saw_attached: bool,
+    saw_injected: bool,
 }
 
 impl Default for Inner {
@@ -248,6 +340,11 @@ impl Default for Inner {
         Self {
             handle: None,
             status: PatcherStatus::default(),
+            log_path: None,
+            log_offset: 0,
+            log_pending: String::new(),
+            saw_attached: false,
+            saw_injected: false,
         }
     }
 }
@@ -263,22 +360,26 @@ impl PatcherState {
     pub fn status(&self) -> PatcherStatus {
         let mut inner = self.inner.lock();
 
-        if let Some(handle) = inner.handle {
-            if elevated::alive(handle) {
-                /* The loader has no stdio of its own, so the game's own process
-                is what tells a session from a scan. */
-                inner.status.state = Some(
-                    if probe::game_pid().is_some() {
-                        "injected"
-                    } else {
-                        "scanning"
-                    }
-                    .to_string(),
-                );
+        refresh_from_log(&mut inner);
+        inner.status.game_running = probe::game_pid().is_some();
+
+        let alive = inner.handle.is_some_and(elevated::alive);
+        if alive {
+            inner.status.running = true;
+
+            if inner.status.error.is_some() {
+                inner.status.state = Some("failed".into());
+            } else if inner.saw_injected {
+                inner.status.state = Some("injected".into());
+            } else if inner.saw_attached || inner.status.game_running {
+                inner.status.state = Some("attached".into());
             } else {
-                inner.handle = None;
-                inner.status = PatcherStatus::default();
+                inner.status.state = Some("scanning".into());
             }
+        } else {
+            inner.handle = None;
+            inner.status.running = false;
+            inner.status.state = inner.status.error.as_ref().map(|_| "failed".to_string());
         }
 
         inner.status.clone()
@@ -302,16 +403,24 @@ impl PatcherState {
 
         inner.handle = None;
         elevated::kill(handle);
-        inner.status = PatcherStatus::default();
+        if probe::loader_pid().is_some() && !probe::kill_loader() {
+            tracing::warn!("the injection loader outlived its job");
+        }
+        inner.status = PatcherStatus {
+            game_running: false,
+            ..PatcherStatus::default()
+        };
+        tracing::info!("injection loader stopped");
         Ok(())
     }
 
     /// Start the loader over `overlay`, elevated.
     pub fn start(&self, loader_exe: &Path, overlay: &Path) -> AppResult<()> {
         let mut inner = self.inner.lock();
-        if inner.handle.is_some() {
+        if inner.handle.is_some_and(elevated::alive) {
             return Err(AppError::Other("the patcher is already running".into()));
         }
+        inner.handle = None;
 
         /* A loader this app does not hold a handle on still hooks whatever game
         it finds, so one left by an earlier run has to be cleared first. */
@@ -331,21 +440,153 @@ impl PatcherState {
             ));
         }
 
+        let dll = loader_exe.with_file_name(LOADER_DLL_NAME);
+        if !dll.is_file() {
+            let error = format!(
+                "{LOADER_DLL_NAME} is missing beside the loader; an antivirus may have removed it"
+            );
+            tracing::warn!(loader = %loader_exe.display(), "{error}");
+            return Err(AppError::Other(error));
+        }
+
+        /* The watcher can write the first overlay after the host starts, so an
+        empty overlay directory is a valid session. */
+        fs::create_dir_all(overlay)?;
+
+        let log_dir = crate::logging::default_log_dir()
+            .ok_or_else(|| AppError::Other("no log directory for the injection loader".into()))?;
+        fs::create_dir_all(&log_dir)?;
+
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let log_path = log_dir.join(format!("loader-{stamp}.log"));
+        let script_path = log_dir.join("loader-run.cmd");
+        fs::write(&script_path, loader_script(loader_exe, overlay, &log_path))?;
+
+        let command = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
+        let arguments = format!("/c call \"{}\"", script_path.display());
+
         tracing::info!(
             loader = %loader_exe.display(),
             overlay = %overlay.display(),
+            log = %log_path.display(),
             "starting the injection loader (elevated)"
         );
 
-        let handle =
-            elevated::spawn_runas(&loader_exe.to_string_lossy(), &overlay.to_string_lossy())?;
+        let handle = match elevated::spawn_runas(&command, &arguments) {
+            Ok(handle) => handle,
+            Err(error) => {
+                tracing::warn!(%error, "the injection loader did not start");
+                return Err(error);
+            }
+        };
 
         inner.status = PatcherStatus {
             running: true,
-            state: Some("scanning".to_string()),
+            state: Some("scanning".into()),
             error: None,
+            log_path: Some(log_path.to_string_lossy().into_owned()),
+            game_running: false,
         };
+        inner.log_path = Some(log_path);
+        inner.log_offset = 0;
+        inner.log_pending.clear();
+        inner.saw_attached = false;
+        inner.saw_injected = false;
         inner.handle = Some(handle);
         Ok(())
     }
 }
+
+/// The batch file that redirects the loader's console to its log.
+///
+/// `cmd` expands `%` in a batch line even inside quotes, so a path that holds
+/// one is written doubled.
+fn loader_script(loader: &Path, overlay: &Path, log: &Path) -> String {
+    let path = |value: &Path| value.to_string_lossy().replace('%', "%%");
+
+    format!(
+        "@echo off\r\n\"{}\" \"{}\" > \"{}\" 2>&1\r\nexit /b\r\n",
+        path(loader),
+        path(overlay),
+        path(log)
+    )
+}
+
+/// Read the bytes written since the last check, and fold whole lines into the status.
+fn refresh_from_log(inner: &mut Inner) {
+    let Some(path) = inner.log_path.clone() else {
+        return;
+    };
+    let Ok(bytes) = fs::read(&path) else {
+        return;
+    };
+    if bytes.len() as u64 <= inner.log_offset {
+        return;
+    }
+
+    let fresh = &bytes[inner.log_offset as usize..];
+    inner.log_offset = bytes.len() as u64;
+    inner.log_pending.push_str(&String::from_utf8_lossy(fresh));
+
+    while let Some(end) = inner.log_pending.find('\n') {
+        let line = inner.log_pending[..end].trim_end_matches('\r').to_string();
+        inner.log_pending.drain(..=end);
+        apply_loader_line(inner, &line);
+    }
+}
+
+/// Fold one loader line into the session state.
+fn apply_loader_line(inner: &mut Inner, line: &str) {
+    let text = line.trim();
+    if text.is_empty() {
+        return;
+    }
+
+    let lower = text.to_ascii_lowercase();
+
+    if is_loader_failure(&lower) {
+        tracing::warn!(target: "patcher", loader = %text, "the injection loader reported a failure");
+        inner.status.error = Some(clip(text, MAX_LOADER_ERROR));
+        inner.status.state = Some("failed".into());
+        return;
+    }
+
+    if lower.contains("dll initialization entry acknowledged") || lower.contains("init done") {
+        tracing::info!(target: "patcher", "the injection DLL acknowledged its initialization");
+        inner.saw_injected = true;
+        inner.status.state = Some("injected".into());
+        inner.status.error = None;
+        return;
+    }
+
+    if lower.contains("[diag] target pid=") || lower.contains("waiting for game to exit") {
+        inner.saw_attached = true;
+        if !inner.saw_injected {
+            inner.status.state = Some("attached".into());
+        }
+    }
+}
+
+/// Whether a loader line names a failure.
+fn is_loader_failure(lower: &str) -> bool {
+    [
+        "failed to",
+        "failed;",
+        "timeout out",
+        "no profile path",
+        "invalid profile path",
+        "loaded_dll=not loaded",
+        "could not ",
+        "error:",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+/// `text`, cut to `max` characters on a character boundary.
+fn clip(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+#[cfg(test)]
+mod tests;

@@ -63,15 +63,24 @@ fn runtime_dir(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(data.join("runtime").join("pengu"))
 }
 
+/// What [`prepare`] wrote, and whether the client must restart to read it.
+pub struct Prepared {
+    /// Whether the debugger entry changed, which a running client reads only on restart.
+    pub registration_changed: bool,
+}
+
 /// Write the runtime and the plugin, and point the client at the loader.
 ///
 /// Called when the client bridge starts. It is idempotent: unchanged files are
 /// left alone, so a running client is not disturbed by a restart of the app.
-pub fn prepare(app: &AppHandle, port: u16, token: &str) -> AppResult<PathBuf> {
+pub fn prepare(app: &AppHandle, port: u16, token: &str) -> AppResult<Prepared> {
     let dir = install_runtime(app)?;
     write_plugin(&dir, port, token)?;
-    enable(&dir)?;
-    Ok(dir)
+    let registration_changed = enable(&dir)?;
+
+    Ok(Prepared {
+        registration_changed,
+    })
 }
 
 /// Write every runtime file into `dir`, skipping ones that already match.
@@ -117,7 +126,10 @@ fn same_command(a: &str, b: &str) -> bool {
 }
 
 /// Register the loader as the client's debugger, clearing the way first.
-fn enable(dir: &Path) -> AppResult<()> {
+///
+/// Answers whether the entry changed, which is what a running client needs a
+/// restart for.
+fn enable(dir: &Path) -> AppResult<bool> {
     let dll = dir.join(CORE_DLL);
     if !dll.is_file() {
         return Err(AppError::Other(
@@ -135,7 +147,7 @@ fn enable(dir: &Path) -> AppResult<()> {
         }
 
         if same_command(&existing, &value) {
-            return Ok(());
+            return Ok(false);
         }
     }
 
@@ -148,7 +160,7 @@ fn enable(dir: &Path) -> AppResult<()> {
     )?;
 
     match registered()? {
-        Some(written) if same_command(&written, &value) => Ok(()),
+        Some(written) if same_command(&written, &value) => Ok(true),
         _ => Err(AppError::Other(
             "the client loader was not registered".into(),
         )),

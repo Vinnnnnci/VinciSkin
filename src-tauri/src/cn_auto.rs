@@ -64,6 +64,8 @@ pub struct AutoStatus {
     pub applied: Option<AutoApplied>,
     /// The last failure, when there was one.
     pub error: Option<String>,
+    /// Whether the client has to restart before the follow plugin loads.
+    pub needs_client_restart: bool,
 }
 
 /// The managed watcher, held by Tauri for the commands.
@@ -100,6 +102,8 @@ impl AutoSwapState {
 
         let config = app_handle.state::<SettingsState>().config();
         let direct = lcu::endpoint(&config).is_some();
+        let mut startup_error = None;
+        let mut needs_client_restart = false;
 
         /* A client whose lockfile answers here is read over its own API, so
         nothing is loaded into it and no listener is started. */
@@ -111,13 +115,20 @@ impl AutoSwapState {
                     /* The plugin is written before the loader check, so a plugin
                     that already loaded keeps working even when the registration is
                     something this app did not write. */
-                    if let Err(error) = pengu::prepare(app_handle, bridge.port, &bridge.token) {
-                        tracing::warn!("client loader not prepared: {error}");
+                    match pengu::prepare(app_handle, bridge.port, &bridge.token) {
+                        Ok(prepared) => {
+                            needs_client_restart = prepared.registration_changed;
+                        }
+                        Err(error) => {
+                            tracing::warn!("client loader not prepared: {error}");
+                            startup_error = Some(error.to_string());
+                        }
                     }
                     (Some(Arc::clone(&bridge.state)), Some(bridge))
                 }
                 Err(error) => {
                     tracing::warn!("client bridge listener failed: {error}");
+                    startup_error = Some(error.to_string());
                     (None, None)
                 }
             }
@@ -133,6 +144,14 @@ impl AutoSwapState {
         }
 
         *self.bridge.lock() = listener;
+
+        {
+            let mut status = self.status.lock();
+            status.error = startup_error;
+            status.needs_client_restart = needs_client_restart;
+        }
+
+        tracing::info!(direct, needs_client_restart, "auto-swap watcher starting");
 
         let running = Arc::clone(&token);
         let status = Arc::clone(&self.status);
@@ -155,6 +174,11 @@ impl AutoSwapState {
         if let Err(error) = pengu::disable() {
             tracing::warn!("could not remove the client loader: {error}");
         }
+
+        let mut status = self.status.lock();
+        status.error = None;
+        status.needs_client_restart = false;
+        status.current_champion = None;
     }
 
     /// What the watcher is doing now.
@@ -182,7 +206,12 @@ fn follow(
     while running.load(Ordering::SeqCst) {
         match tick(app_handle, &mut last, bridge.as_ref()) {
             Ok((current, applied)) => set(&status, |s| {
-                s.error = None;
+                /* A read with no pick is the client not being up yet, not a
+                reason to drop a bridge or loader failure from the status. */
+                if current.is_some() {
+                    s.error = None;
+                    s.needs_client_restart = false;
+                }
                 s.current_champion = current;
                 s.applied = applied.or_else(|| s.applied.take());
             }),

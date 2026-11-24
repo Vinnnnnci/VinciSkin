@@ -196,9 +196,35 @@ pub async fn apply_cn_static_swap(
     skin_id: u32,
     app_handle: AppHandle,
 ) -> IpcResult<ChampionSwap> {
+    let host = app_handle.state::<PatcherState>().status();
+
     off_thread(move || {
         let (config, storage) = swap_context(&app_handle)?;
-        vinciskin_core::static_swap::overlay_apply(&config, &storage, &character, skin_id, hero_id)
+
+        match vinciskin_core::static_swap::overlay_apply(
+            &config, &storage, &character, skin_id, hero_id,
+        ) {
+            Ok(applied) => {
+                tracing::info!(
+                    champion = %applied.character,
+                    skin = skin_id,
+                    archive = %applied.archive,
+                    host_running = host.running,
+                    game_running = host.game_running,
+                    "cn skin applied"
+                );
+                Ok(applied)
+            }
+            Err(error) => {
+                tracing::warn!(
+                    champion = %character,
+                    skin = skin_id,
+                    %error,
+                    "cn skin apply failed"
+                );
+                Err(error)
+            }
+        }
     })
     .await
 }
@@ -212,7 +238,9 @@ pub async fn restore_cn_static_swap(
 ) -> IpcResult<ChampionSwap> {
     off_thread(move || {
         let (config, storage) = swap_context(&app_handle)?;
-        vinciskin_core::static_swap::overlay_restore(&config, &storage, &character)
+        let restored = vinciskin_core::static_swap::overlay_restore(&config, &storage, &character)?;
+        tracing::info!(champion = %restored.character, "cn skin restored");
+        Ok(restored)
     })
     .await
 }
@@ -371,11 +399,6 @@ fn start_cn_patcher_inner(app_handle: &AppHandle, patcher: &State<PatcherState>)
     }
 
     let overlay = overlay_dir(&storage);
-    if !overlay.is_dir() {
-        return Err(AppError::Other(
-            "no overlay has been built yet - apply a skin first".into(),
-        ));
-    }
 
     /* The loader ships beside the app in a bundled build, and inside it in a
     portable one, where it is unpacked under the app's own data directory. */
@@ -388,7 +411,13 @@ fn start_cn_patcher_inner(app_handle: &AppHandle, patcher: &State<PatcherState>)
             crate::patcher::unpack_loader(&dir)?
         }
     };
-    patcher.start(&loader, &overlay)
+
+    let result = patcher.start(&loader, &overlay);
+    if let Err(error) = &result {
+        tracing::warn!(%error, overlay = %overlay.display(), "the injection host did not start");
+    }
+
+    result
 }
 
 /// Stop the injection host.

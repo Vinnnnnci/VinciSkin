@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Button, ComboboxField, EmptyState, Spinner, Switch, useToast } from "@/components";
-import { describeError, m } from "@/i18n";
+import { describeError, errorMessage, m } from "@/i18n";
 import { api, type CnHero, type CnQuality, isOk, unwrap } from "@/lib/tauri";
 import { usePlay } from "@/modules/launcher";
 
@@ -61,8 +61,24 @@ export function CnCatalog() {
 
     try {
       unwrap(await api.cn.startPatcher());
-    } catch {
-      /* A host that is already up is not a reason to refuse the launch. */
+    } catch (error: unknown) {
+      const detail = errorMessage(error);
+
+      /* A host this page started earlier is already doing the job. Every other
+         refusal means the game would run without an overlay, so it stops the
+         launch rather than hiding behind "League is already running". */
+      if (!detail.includes("the patcher is already running")) {
+        toast.error(m.cn_inject_failed_title(), detail);
+        return;
+      }
+    }
+
+    /* A host that was already up may be one that failed to hook. Starting the
+       game over it would show the same nothing the reader just reported. */
+    const host = await api.cn.patcherStatus();
+    if (isOk(host) && host.value.error) {
+      toast.error(m.cn_inject_failed_title(), host.value.error);
+      return;
     }
 
     await launchOnly();

@@ -38,6 +38,24 @@ function ThemeProvider({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// A failure the router and the boundary did not catch still reaches the log.
+function reportUiError(message: string, stack?: string) {
+  void api.logUiError({ message, stack, route: window.location.pathname }).catch(() => {});
+}
+
+window.addEventListener("error", (event) => {
+  if (!event.message) return;
+  reportUiError(event.message, event.error instanceof Error ? event.error.stack : undefined);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason: unknown = event.reason;
+  reportUiError(
+    reason instanceof Error ? reason.message : String(reason),
+    reason instanceof Error ? reason.stack : undefined,
+  );
+});
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

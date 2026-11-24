@@ -203,14 +203,23 @@ impl<T> IpcResult<T> {
         IpcResult::Ok { value }
     }
 
+    #[track_caller]
     pub fn err(error: impl Into<AppErrorResponse>) -> Self {
-        IpcResult::Err {
-            error: error.into(),
-        }
+        let error = error.into();
+
+        tracing::warn!(
+            target: "ipc",
+            location = %std::panic::Location::caller(),
+            error = ?error,
+            "command failed"
+        );
+
+        IpcResult::Err { error }
     }
 }
 
 impl<T, E: Into<AppErrorResponse>> From<Result<T, E>> for IpcResult<T> {
+    #[track_caller]
     fn from(result: Result<T, E>) -> Self {
         match result {
             Ok(value) => IpcResult::Ok { value },

@@ -352,10 +352,14 @@ export type { ChampionSwap, PackSwap, SwapState } from "@/lib/bindings.gen";
 /** What the injection host is doing now. */
 export interface CnPatcherStatus {
   running: boolean;
-  /** `injecting` | `injected` | `waiting` | `exited` | `failed`, or `null` before a session. */
+  /** `scanning` | `attached` | `injected` | `failed`, or `null` before a session. */
   state: string | null;
-  /** The last error line the host reported, if any. */
+  /** The last error line the loader reported, if any. */
   error: string | null;
+  /** The log the loader writes, when a session has started. */
+  logPath: string | null;
+  /** Whether the game process is up now. */
+  gameRunning: boolean;
 }
 
 /** The skin the champ-select watcher last applied, while one is still shown. */
@@ -371,6 +375,8 @@ export interface CnAutoStatus {
   currentChampion: number | null;
   applied: CnAutoApplied | null;
   error: string | null;
+  /** Whether the client has to restart before the follow plugin loads. */
+  needsClientRestart: boolean;
 }
 export type { Result } from "@/utils/result";
 export { isErr, isOk, match, unwrap, unwrapOr } from "@/utils/result";
@@ -431,6 +437,8 @@ export const api = {
     cancel: (operationId: string) => commands.cancelIntegrationDownload(operationId).then(toResult),
   },
   getAppInfo: () => invokeResult<AppInfo>("get_app_info"),
+  logUiError: (report: { message: string; stack?: string; route?: string }) =>
+    invokeResult<void>("log_ui_error", { report }),
   getPlatformSupport: () => invokeResult<PlatformSupport>("get_platform_support"),
   showMainWindow: () => invokeResult<void>("show_main_window"),
 

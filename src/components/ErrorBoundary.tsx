@@ -1,7 +1,8 @@
 import { WarningOctagonIcon } from "@phosphor-icons/react";
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { m } from "@/i18n";
+import { api } from "@/lib/tauri";
 
 import { Button } from "./Button";
 
@@ -31,6 +32,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   static getDerivedStateFromError(): ErrorBoundaryState {
     return { crashed: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    void api
+      .logUiError({
+        message: `${error.name}: ${error.message}`,
+        stack: info.componentStack ?? error.stack,
+        route: window.location.pathname,
+      })
+      .catch(() => {});
   }
 
   retry = () => {

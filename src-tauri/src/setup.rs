@@ -13,6 +13,8 @@ use vinciskin_core::diagnostics::store::IncidentStore;
 use vinciskin_core::events::EventSink;
 
 pub fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    crate::logging::stage("setup-start");
+
     let app_handle = app.handle().clone();
 
     // The taskbar and the Alt-Tab list read the title, so the build rides in it.
@@ -165,6 +167,7 @@ pub fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         crate::deep_link::handle_urls(&handle_clone, &event.urls());
     });
 
+    crate::logging::stage("setup-done");
     Ok(())
 }
 

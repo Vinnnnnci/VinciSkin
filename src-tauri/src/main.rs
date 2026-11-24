@@ -21,6 +21,7 @@ mod pengu;
 mod protocol;
 mod redact;
 mod setup;
+mod startup;
 mod state;
 mod tray;
 mod workshop;
@@ -34,6 +35,7 @@ const MAIN_WINDOW: &str = "main";
 
 fn main() {
     let logging_guards = logging::init();
+    logging::stage("app-start");
 
     tracing::info!("Starting VinciSkin v{}", env!("CARGO_PKG_VERSION"));
     if let Some(ref p) = logging_guards.log_path {
@@ -54,7 +56,9 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build());
 
-    builder
+    logging::stage("tauri-build-start");
+
+    let app = builder
         /* The preview's pixels come this way rather than over IPC, so an
         `<img>` draws them with the webview's own decoder. */
         .register_asynchronous_uri_scheme_protocol(protocol::SCHEME, |ctx, request, responder| {
@@ -82,6 +86,7 @@ fn main() {
         .invoke_handler(ipc::invoke_handler(tauri::generate_handler![
             // App
             commands::get_app_info,
+            commands::log_ui_error,
             commands::get_platform_support,
             commands::show_main_window,
             // Settings
@@ -233,7 +238,18 @@ fn main() {
             // for dynamic icons
             tray::set_tray_state,
         ]))
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(setup::handle_run_event);
+        .build(tauri::generate_context!());
+
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => {
+            tracing::error!(%error, "could not build the application");
+            logging::stage_detail("tauri-build-failed", &error.to_string());
+            startup::show_build_error(&error.to_string());
+            return;
+        }
+    };
+
+    logging::stage("tauri-build-ok");
+    app.run(setup::handle_run_event);
 }

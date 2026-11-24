@@ -63,9 +63,10 @@ pub struct SavedSupportReport {
 pub async fn build_support_report(
     problem: String,
     notes: String,
+    include_game_log: bool,
     app: AppHandle,
 ) -> IpcResult<SupportReportPreview> {
-    off_thread(move || preview(&app, &problem, &notes)).await
+    off_thread(move || preview(&app, &problem, &notes, include_game_log)).await
 }
 
 /// Writes the report to `path`, the one the save dialog answered.
@@ -74,13 +75,19 @@ pub async fn save_support_report(
     path: String,
     problem: String,
     notes: String,
+    include_game_log: bool,
     app: AppHandle,
 ) -> IpcResult<SavedSupportReport> {
-    off_thread(move || save(&app, &path, &problem, &notes)).await
+    off_thread(move || save(&app, &path, &problem, &notes, include_game_log)).await
 }
 
-fn preview(app: &AppHandle, problem: &str, notes: &str) -> AppResult<SupportReportPreview> {
-    let report = build(app, problem, notes)?;
+fn preview(
+    app: &AppHandle,
+    problem: &str,
+    notes: &str,
+    include_game_log: bool,
+) -> AppResult<SupportReportPreview> {
+    let report = build(app, problem, notes, include_game_log)?;
 
     let files = report
         .files()
@@ -106,8 +113,14 @@ fn preview(app: &AppHandle, problem: &str, notes: &str) -> AppResult<SupportRepo
     })
 }
 
-fn save(app: &AppHandle, path: &str, problem: &str, notes: &str) -> AppResult<SavedSupportReport> {
-    let report = build(app, problem, notes)?;
+fn save(
+    app: &AppHandle,
+    path: &str,
+    problem: &str,
+    notes: &str,
+    include_game_log: bool,
+) -> AppResult<SavedSupportReport> {
+    let report = build(app, problem, notes, include_game_log)?;
     let path = PathBuf::from(path);
 
     report
@@ -123,14 +136,19 @@ fn save(app: &AppHandle, path: &str, problem: &str, notes: &str) -> AppResult<Sa
     })
 }
 
-fn build(app: &AppHandle, problem: &str, notes: &str) -> AppResult<support_report::Report> {
-    let inputs = collect(app, problem, notes);
+fn build(
+    app: &AppHandle,
+    problem: &str,
+    notes: &str,
+    include_game_log: bool,
+) -> AppResult<support_report::Report> {
+    let inputs = collect(app, problem, notes, include_game_log);
 
     support_report::build(&inputs).map_err(|error| AppError::Other(error.to_string()))
 }
 
 /// Everything a report is built from, read once from the running app.
-fn collect(app: &AppHandle, problem: &str, notes: &str) -> ReportInputs {
+fn collect(app: &AppHandle, problem: &str, notes: &str, include_game_log: bool) -> ReportInputs {
     let settings_state: tauri::State<'_, SettingsState> = app.state();
     let settings = settings_state.0.lock().clone();
 
@@ -157,6 +175,7 @@ fn collect(app: &AppHandle, problem: &str, notes: &str) -> ReportInputs {
         patcher: patcher_facts(patcher),
         incidents: incidents(app),
         logs: logs(),
+        game_logs: game_logs(app, include_game_log),
         problem: ProblemKind::parse(problem),
         notes: notes.to_owned(),
     }
@@ -215,6 +234,47 @@ fn patcher_facts(status: crate::patcher::PatcherStatus) -> PatcherFacts {
             .map(str::to_owned),
         game: crate::logging::game_id(),
     }
+}
+
+/// The game's own log of the newest incident that recorded one, only when asked for.
+fn game_logs(app: &AppHandle, include: bool) -> Vec<LogSource> {
+    if !include {
+        return Vec::new();
+    }
+
+    let store = app.state::<IncidentStoreState>();
+    let Ok(stored) = store.0.list() else {
+        return Vec::new();
+    };
+
+    let Some(path) = stored
+        .iter()
+        .filter_map(|incident| incident.game.as_ref())
+        .map(|game| game.log_path.as_str())
+        .next()
+    else {
+        return Vec::new();
+    };
+
+    let Ok(bytes) = fs_err::read(path) else {
+        tracing::warn!(path, "the report could not read the game log");
+        return Vec::new();
+    };
+
+    let bytes = tail(&bytes, MAX_LOG_BYTES as usize);
+    let name = path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or("game.log")
+        .to_owned();
+
+    vec![LogSource {
+        name,
+        text: String::from_utf8_lossy(bytes).into_owned(),
+        modified: fs_err::metadata(path)
+            .ok()
+            .and_then(|meta| meta.modified().ok()),
+    }]
 }
 
 /// The last few incidents, as the record and as the text a thread reads.

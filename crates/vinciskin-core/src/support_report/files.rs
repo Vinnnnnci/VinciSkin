@@ -114,8 +114,8 @@ pub struct IncidentFile {
     pub text: String,
 }
 
-/// The logs a report carries, newest first, until the budget is spent.
-pub fn logs(sources: &[LogSource]) -> Vec<ReportFile> {
+/// The logs a report carries under `dir`, newest first, until the budget is spent.
+pub fn logs(dir: &str, sources: &[LogSource]) -> Vec<ReportFile> {
     let mut sources: Vec<&LogSource> = sources.iter().collect();
     sources.sort_by(|a, b| b.modified.cmp(&a.modified));
 
@@ -137,7 +137,7 @@ pub fn logs(sources: &[LogSource]) -> Vec<ReportFile> {
 
         spent += bytes.len();
         files.push(ReportFile {
-            path: format!("log/{}", file_name(&source.name)),
+            path: format!("{dir}/{}", file_name(&source.name)),
             bytes,
         });
     }

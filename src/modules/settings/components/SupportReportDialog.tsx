@@ -2,7 +2,7 @@ import { CopyIcon, DownloadSimpleIcon } from "@phosphor-icons/react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 
-import { Button, Dialog, RadioGroup, Spinner, TextareaField, useToast } from "@/components";
+import { Button, Dialog, RadioGroup, Spinner, Switch, TextareaField, useToast } from "@/components";
 import { m } from "@/i18n";
 import { errorSummary } from "@/i18n/errors";
 import { formatBytes } from "@/utils";
@@ -47,9 +47,10 @@ function SupportReportContent({ open, onClose }: { open: boolean; onClose: () =>
   const [problem, setProblem] = useState<string>("other");
   const [notes, setNotes] = useState("");
   const [committedNotes, setCommittedNotes] = useState("");
+  const [includeGameLog, setIncludeGameLog] = useState(false);
   const [selected, setSelected] = useState(0);
 
-  const report = useSupportReport(problem, committedNotes, open);
+  const report = useSupportReport(problem, committedNotes, includeGameLog, open);
   const saveReport = useSaveSupportReport();
   const { toast } = useToast();
 
@@ -64,7 +65,12 @@ function SupportReportContent({ open, onClose }: { open: boolean; onClose: () =>
     if (!path) return;
 
     try {
-      const saved = await saveReport.mutateAsync({ path, problem, notes: committedNotes });
+      const saved = await saveReport.mutateAsync({
+        path,
+        problem,
+        notes: committedNotes,
+        includeGameLog,
+      });
       toast({ title: m.support_report_saved_title(), description: saved.path });
       onClose();
     } catch (error) {
@@ -101,6 +107,14 @@ function SupportReportContent({ open, onClose }: { open: boolean; onClose: () =>
             textareaClassName="h-[8.5rem] resize-none"
           />
         </div>
+
+        <label className="flex items-start gap-2.5 rounded-lg border border-surface-700 px-3 py-2 select-none">
+          <Switch checked={includeGameLog} onCheckedChange={setIncludeGameLog} />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-sm text-surface-200">{m.support_report_game_log_label()}</span>
+            <span className="text-xs text-surface-500">{m.support_report_game_log_hint()}</span>
+          </span>
+        </label>
 
         {report.isLoading && (
           <div className="flex flex-1 items-center justify-center">

@@ -643,10 +643,19 @@ export const api = {
   minimizeToTray: () => invokeResult<void>("minimize_to_tray"),
 
   // Support report
-  buildSupportReport: (problem: string, notes: string) =>
-    invokeResult<SupportReportPreview>("build_support_report", { problem, notes }),
-  saveSupportReport: (path: string, problem: string, notes: string) =>
-    invokeResult<SavedSupportReport>("save_support_report", { path, problem, notes }),
+  buildSupportReport: (problem: string, notes: string, includeGameLog: boolean) =>
+    invokeResult<SupportReportPreview>("build_support_report", {
+      problem,
+      notes,
+      includeGameLog,
+    }),
+  saveSupportReport: (path: string, problem: string, notes: string, includeGameLog: boolean) =>
+    invokeResult<SavedSupportReport>("save_support_report", {
+      path,
+      problem,
+      notes,
+      includeGameLog,
+    }),
 
   // Storage
   detectStorageMedium: (path: string) =>

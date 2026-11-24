@@ -21,6 +21,7 @@ fn inputs(logs: Vec<LogSource>) -> ReportInputs {
         patcher: PatcherFacts::default(),
         incidents: Vec::new(),
         logs,
+        game_logs: Vec::new(),
         problem: ProblemKind::Other,
         notes: String::new(),
     }
@@ -226,4 +227,29 @@ fn a_name_that_would_leave_the_directory_is_flattened() {
             .map(|file| &file.path)
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn a_game_log_travels_under_its_own_directory_only_when_offered() {
+    let mut inputs = inputs(vec![log("vinciskin.2026-11-25.log", "x\n", Duration::ZERO)]);
+
+    let without = build(&inputs).expect("a report");
+    assert!(
+        without
+            .files()
+            .iter()
+            .all(|file| !file.path.starts_with("game-log/"))
+    );
+
+    inputs.game_logs = vec![log("r3dlog.txt", "saw PUUID(<account>)\n", Duration::ZERO)];
+    let with = build(&inputs).expect("a report");
+
+    let game: Vec<&ReportFile> = with
+        .files()
+        .iter()
+        .filter(|file| file.path.starts_with("game-log/"))
+        .collect();
+
+    assert_eq!(game.len(), 1);
+    assert_eq!(game[0].path, "game-log/r3dlog.txt");
 }

@@ -60,12 +60,12 @@ export const settingsQueries = {
 
   /* Built on demand, because the whole point is that it is the bundle as it stands now: the
      checks that just ran, the library as it is indexed, and the log the last run wrote. The
-     notes sit in the key because they are part of report.md, so the saved zip matches the
-     preview rather than hashing one more line into it. */
-  supportReport: (problem: string, notes: string, enabled: boolean) =>
+     notes and the game log sit in the key because both are part of what is written, so the
+     saved zip matches the preview rather than differing by one more file. */
+  supportReport: (problem: string, notes: string, includeGameLog: boolean, enabled: boolean) =>
     queryOptions<SupportReportPreview, AppError>({
-      queryKey: settingsKeys.supportReport(problem, notes),
-      queryFn: queryFnWithArgs(api.buildSupportReport, problem, notes),
+      queryKey: settingsKeys.supportReport(problem, notes, includeGameLog),
+      queryFn: queryFnWithArgs(api.buildSupportReport, problem, notes, includeGameLog),
       enabled,
       staleTime: 0,
       gcTime: 0,

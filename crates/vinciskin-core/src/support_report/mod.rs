@@ -61,6 +61,8 @@ pub struct ReportInputs {
     pub patcher: PatcherFacts,
     pub incidents: Vec<IncidentFile>,
     pub logs: Vec<LogSource>,
+    /// The game's own log, carried only when the user asked for it.
+    pub game_logs: Vec<LogSource>,
     pub problem: ProblemKind,
     /// What the user wrote about the problem, free of charge and of redaction until now.
     pub notes: String,
@@ -161,7 +163,8 @@ pub enum ReportError {
 
 /// Build every file the report carries, in the order the preview lists them.
 pub fn build(inputs: &ReportInputs) -> Result<Report, ReportError> {
-    let mut files = files::logs(&inputs.logs);
+    let mut files = files::logs("log", &inputs.logs);
+    files.extend(files::logs("game-log", &inputs.game_logs));
 
     files.push(ReportFile::json("system.json", &files::system(inputs)));
     files.push(ReportFile::json("settings.json", &inputs.settings));

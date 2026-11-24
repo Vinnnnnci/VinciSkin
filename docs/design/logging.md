@@ -1,6 +1,6 @@
 # 日志与诊断包设计
 
-- **状态**：部分实现（2026-11-24）。换肤链路修复、loader 日志、启动/panic/UI 日志、Windows 版本显示已落地。脱敏、日志 id、大小上限、诊断包与 `--report` 仍未落地。
+- **状态**：部分实现（2026-11-24）。换肤链路修复、loader 日志、启动/panic/UI 日志、Windows 版本显示、脱敏写入器、run/session/game id、5 MB 轮转与总量上限、诊断页的 WebView2/架构/.NET 检查已落地。诊断包、`--report`、GPU 检查、`ui-ready` 看门狗仍未落地。
 - **范围**：`src-tauri/src/logging*`、`src-tauri/src/setup.rs`、`src-tauri/src/main.rs`、`crates/vinciskin-core/src/diagnostics`、安装器、设置页与诊断页
 - **目标**：用户说“Win10 用不了”时，一次操作能拿到定位问题的证据。软件根本打不开时也要有证据。
 - **非目标**：默认上传、默认遥测、自动修复、全量带走游戏日志
@@ -11,11 +11,16 @@
 | ---------------------------------------------------------------- | ------ | -------------------------------------------------------------- |
 | 换肤链路：失败不吞、应用检查宿主、游戏已运行提示、跟随先启动注入 | 已实现 | `CnCatalog.tsx`、`CnSkinGrid.tsx`、`CnSessionControl.tsx`      |
 | loader 输出捕获、`injected` 以 DLL ack 为准、job 结束进程树      | 已实现 | `src-tauri/src/patcher.rs`                                     |
-| 启动阶段日志、panic 日志、WebView2/OS 环境行                     | 已实现 | `src-tauri/src/logging.rs`、`main.rs`、`setup.rs`              |
+| 启动阶段日志、panic 日志、WebView2/OS 环境行                     | 已实现 | `src-tauri/src/logging/`、`main.rs`、`setup.rs`                |
 | 前端错误回传、IPC 失败日志                                       | 已实现 | `commands/app.rs`、`error.rs`、`main.tsx`、`ErrorBoundary.tsx` |
 | 日志文件路径与“打开日志文件”                                     | 已实现 | `commands/app.rs`、`commands/shell.rs`                         |
 | 诊断页 Windows 11 显示                                           | 已实现 | `diagnostics/windows.rs`                                       |
-| 脱敏、run/session/game id、5 MB 轮转、诊断包 zip、`--report`     | 未实现 | 见下文设计                                                     |
+| 脱敏写入器：注册值 + 用户目录/URL/邮箱模式                       | 已实现 | `redact.rs`、`logging/writer.rs`                               |
+| run/session/game id 写在每行                                     | 已实现 | `logging/format.rs`、`logging/mod.rs`、`patcher.rs`            |
+| 5 MB 单文件轮转、50 MB 总量、`boot.log` 256 KB                   | 已实现 | `logging/writer.rs`、`logging/mod.rs`                          |
+| `verbosePatcherLogging` 接到 reload handle                       | 已实现 | `logging/mod.rs`、`state.rs`、`commands/settings.rs`           |
+| 诊断页 WebView2、64 位、.NET Framework 4.8                       | 已实现 | `diagnostics/windows.rs`                                       |
+| 诊断包 zip、`--report`、GPU 检查、`ui-ready` 看门狗              | 未实现 | 见下文设计                                                     |
 
 ## 1. 结论
 
@@ -343,7 +348,7 @@ id 放在 `INFO` 和 target 之间，修复 `tracing_subscriber::fmt::FormatEven
 - 启动时清理 7 天前的 `vinciskin.*.log`、`boot.log`、`loader-*.log`。
 - 总大小上限 50 MB，按修改时间从旧到新删。
 
-`cleanup_old_logs` 现在只匹配 `vinciskin.` 前缀和 `.log` 后缀（`logging.rs:125`），要扩展。
+`cleanup_old_logs` 按名字识别 `vinciskin.*.log`（含 `.1.log` 轮转文件）、`boot*.log`、`panic*.log`、`loader-*.log`，先按天数删，再按总量从旧到新删。
 
 ### 7.5 脱敏
 
@@ -379,7 +384,7 @@ id 放在 `INFO` 和 target 之间，修复 `tracing_subscriber::fmt::FormatEven
 - 下载 URL 的签名参数
 - mod 文件内容、游戏日志全文
 
-`redact.rs` 现在只处理 URL（`deep_link/mod.rs:340` 用了它），要扩成一个模块，日志、报告、incident 文本共用。
+`redact.rs` 是共用模块：`line()` 给写入器按行替换，`url()` 给 deep link 和网络日志用，`register*` 登记已知路径。设置加载和保存时登记 `%LEAGUE%`/`%STORAGE%`/`%WORKSHOP%`，启动时登记 `%USERPROFILE%`/`%APPDATA%`/`%LOCALAPPDATA%`。
 
 脱敏不能保证 100%。它是让日志可以贴到公开 issue 的最低要求。诊断包在发送前给用户看，是第二道关。
 
@@ -766,16 +771,17 @@ crates/vinciskin-core/src/
 
 ## 12. 测试
 
-| 测试                                                  | 位置                                              |
-| ----------------------------------------------------- | ------------------------------------------------- |
-| 脱敏：两种斜杠、`%USERPROFILE%`、URL query、邮箱      | `logging/redact_writer.rs` 单测                   |
-| 脱敏 canary：构造带用户名的输入，构建 zip，解压搜不到 | `crates/vinciskin-core/tests/redaction_canary.rs` |
-| boot.log 阶段顺序、trim、上一段未完成                 | `logging/boot.rs` 单测                            |
-| 过滤默认级别：未命名 crate 的 warn 能进文件           | `logging/mod.rs` 单测                             |
-| 报告构建：每个文件都出现、大小上限、路径占位符        | `support_report/tests.rs`                         |
-| panic.json 写入、下次启动读取并删除                   | `logging/panic.rs` 单测                           |
-| 看门狗状态机                                          | `logging/watchdog.rs` 单测                        |
-| WebView2 版本解析（存在/缺失/过旧）                   | `logging/webview.rs` 单测                         |
+| 测试                                                  | 位置                                                     |
+| ----------------------------------------------------- | -------------------------------------------------------- |
+| 脱敏：两种斜杠、`%USERPROFILE%`、URL query、邮箱      | `src-tauri/src/redact/tests.rs`                          |
+| 脱敏写入器：一行分两次写、5 MB 轮转、50 MB 总量       | `src-tauri/src/logging/tests.rs`                         |
+| 脱敏 canary：构造带用户名的输入，构建 zip，解压搜不到 | `crates/vinciskin-core/tests/redaction_canary.rs`        |
+| boot.log 阶段顺序、trim、上一段未完成                 | `logging/boot.rs` 单测                                   |
+| 过滤默认级别：未命名 crate 的 warn 能进文件           | `logging/mod.rs` 单测                                    |
+| 报告构建：每个文件都出现、大小上限、路径占位符        | `support_report/tests.rs`                                |
+| panic.json 写入、下次启动读取并删除                   | `logging/panic.rs` 单测                                  |
+| 看门狗状态机                                          | `logging/watchdog.rs` 单测                               |
+| WebView2 版本解析（存在/缺失/过旧）                   | `crates/vinciskin-core/src/diagnostics/windows/tests.rs` |
 
 手工矩阵：
 

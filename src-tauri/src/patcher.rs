@@ -333,6 +333,7 @@ struct Inner {
     log_pending: String,
     saw_attached: bool,
     saw_injected: bool,
+    saw_game: bool,
 }
 
 impl Default for Inner {
@@ -345,6 +346,7 @@ impl Default for Inner {
             log_pending: String::new(),
             saw_attached: false,
             saw_injected: false,
+            saw_game: false,
         }
     }
 }
@@ -362,6 +364,17 @@ impl PatcherState {
 
         refresh_from_log(&mut inner);
         inner.status.game_running = probe::game_pid().is_some();
+
+        /* A second game in one run gets an id of its own, so the reset is what the next
+        launch is measured from rather than the first one. */
+        if inner.status.game_running {
+            if !inner.saw_game {
+                inner.saw_game = true;
+                crate::logging::start_game();
+            }
+        } else {
+            inner.saw_game = false;
+        }
 
         let alive = inner.handle.is_some_and(elevated::alive);
         if alive {
@@ -410,6 +423,7 @@ impl PatcherState {
             game_running: false,
             ..PatcherStatus::default()
         };
+        crate::logging::end_session();
         tracing::info!("injection loader stopped");
         Ok(())
     }
@@ -465,6 +479,8 @@ impl PatcherState {
         let command = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
         let arguments = format!("/c call \"{}\"", script_path.display());
 
+        crate::logging::start_session();
+
         tracing::info!(
             loader = %loader_exe.display(),
             overlay = %overlay.display(),
@@ -475,6 +491,7 @@ impl PatcherState {
         let handle = match elevated::spawn_runas(&command, &arguments) {
             Ok(handle) => handle,
             Err(error) => {
+                crate::logging::end_session();
                 tracing::warn!(%error, "the injection loader did not start");
                 return Err(error);
             }
@@ -492,6 +509,7 @@ impl PatcherState {
         inner.log_pending.clear();
         inner.saw_attached = false;
         inner.saw_injected = false;
+        inner.saw_game = false;
         inner.handle = Some(handle);
         Ok(())
     }

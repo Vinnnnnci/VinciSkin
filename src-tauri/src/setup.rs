@@ -40,6 +40,7 @@ pub fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     initialize_first_run(&app_handle, &settings_state);
 
     let settings = settings_state.0.lock().clone();
+    crate::logging::set_verbose(settings.verbose_patcher_logging);
 
     // The library owns these stores; `manage` below registers the same `Arc`s so
     // commands can reach them. Constructing them here (rather than having the

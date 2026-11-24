@@ -36,6 +36,9 @@ pub(crate) fn save_settings_inner(
 
     persist_settings(app_handle, &settings)?;
 
+    crate::state::register_redactions(&settings);
+    crate::logging::set_verbose(settings.verbose_patcher_logging);
+
     // The launcher is built from the install root and re-reads the window
     // hider, both of which the user may just have moved. Logged rather than
     // propagated: the settings are already saved, and failing the save for a

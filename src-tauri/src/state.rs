@@ -87,6 +87,7 @@ impl SettingsState {
                 Settings::default()
             }
         };
+        register_redactions(&settings);
         Self(Mutex::new(settings))
     }
 
@@ -106,6 +107,15 @@ impl Default for SettingsState {
     fn default() -> Self {
         Self(Mutex::new(Settings::default()))
     }
+}
+
+/// Keep the user's folders out of the log, before anything logs one.
+pub(crate) fn register_redactions(settings: &Settings) {
+    crate::redact::register_settings(
+        settings.config.league_path.as_deref(),
+        settings.config.mod_storage_path.as_deref(),
+        settings.config.workshop_path.as_deref(),
+    );
 }
 
 /// Theme selection for the application.
@@ -233,6 +243,12 @@ pub struct Settings {
     /// the "show performance warnings" setting if/when we add one.
     #[serde(default)]
     pub has_seen_hdd_warning: bool,
+    /// Whether the injection loader's own output is written in full.
+    ///
+    /// Off by default, which keeps its log to the warnings and errors a support
+    /// report reads. On raises `ltk_overlay` to debug for the rest of the run.
+    #[serde(default)]
+    pub verbose_patcher_logging: bool,
 }
 
 impl Default for Settings {
@@ -257,6 +273,7 @@ impl Default for Settings {
             author_profiles: vec![],
             default_author_profile_id: None,
             has_seen_hdd_warning: false,
+            verbose_patcher_logging: false,
         }
     }
 }

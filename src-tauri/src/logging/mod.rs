@@ -1,28 +1,57 @@
 //! The app log: one file a day, a boot timeline and a panic record.
 //!
-//! The file is the one a support report is read from, so the filter keeps a
-//! default `warn` for crates no directive names. The boot timeline is written
-//! without the subscriber, because a failure before logging is set up is the
-//! one a user reports as "it does not start".
+//! The file is the one a support report is read from, so the filter keeps a default `warn` for
+//! crates no directive names. Every line carries the run it belongs to, and a session or game
+//! where there is one. The boot timeline is written without the subscriber, because a failure
+//! before logging is set up is the one a user reports as "it does not start".
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, SystemTime};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fs_err as fs;
-use tracing_appender::{non_blocking, non_blocking::WorkerGuard, rolling};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_appender::{non_blocking, non_blocking::WorkerGuard};
+use tracing_subscriber::{layer::SubscriberExt, reload, util::SubscriberInitExt, EnvFilter};
+
+mod format;
+mod writer;
+
+#[cfg(test)]
+mod tests;
 
 /// The filter used when `RUST_LOG` names none.
 const DEFAULT_FILTER: &str =
     "vinciskin=debug,ritoclient=debug,ritoclient_core=debug,ltk_overlay=info,tauri=info,warn";
+
+/// The directive the verbose setting raises, and the rung it raises it to.
+const OVERLAY_DIRECTIVE: &str = "ltk_overlay=info";
+const OVERLAY_VERBOSE: &str = "ltk_overlay=debug";
 
 /// The identifier the installer and the log directory use.
 const IDENTIFIER: &str = "com.vinciskin.app";
 
 /// The build at which Windows reports itself as Windows 11.
 const WINDOWS_11_BUILD: u32 = 22_000;
+
+/// Everything the log directory may hold before the oldest files go.
+const MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
+
+/// The size `boot.log` is rotated at, which keeps one run's timeline from growing for days.
+const MAX_BOOT_BYTES: u64 = 256 * 1024;
+
+/// The run a line belongs to, set once per process.
+static RUN: OnceLock<String> = OnceLock::new();
+
+/// The session a line belongs to, `0` outside one.
+static SESSION: AtomicU64 = AtomicU64::new(0);
+
+/// The game a line belongs to, when a session found one.
+static GAME: RwLock<Option<Arc<str>>> = RwLock::new(None);
+
+/// The filter layer, replaced when the verbose setting changes.
+static FILTER: OnceLock<reload::Handle<EnvFilter, tracing_subscriber::Registry>> = OnceLock::new();
 
 /// Return value from logging initialization, holding guards that must live for the app lifetime.
 pub struct LoggingGuards {
@@ -38,14 +67,18 @@ pub fn init() -> LoggingGuards {
     boot::init(log_dir.as_deref());
     boot::stage("logging-ready");
 
+    let _ = RUN.set(new_run_id());
+    register_environment_paths();
+
+    let text = std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_FILTER.to_owned());
+    let (filter, handle) = reload::Layer::new(EnvFilter::new(&text));
+    let _ = FILTER.set(handle);
+
     #[cfg(debug_assertions)]
     let app_handle_holder = Arc::new(OnceLock::new());
 
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| DEFAULT_FILTER.into());
-
     let registry = tracing_subscriber::registry()
-        .with(env_filter)
+        .with(filter)
         .with(tracing_subscriber::fmt::layer());
 
     #[cfg(debug_assertions)]
@@ -55,6 +88,7 @@ pub fn init() -> LoggingGuards {
 
     if let Some(writer) = writer {
         let file_layer = tracing_subscriber::fmt::layer()
+            .event_format(format::LineFormat)
             .with_writer(writer)
             .with_ansi(false);
         registry.with(file_layer).init();
@@ -81,6 +115,72 @@ pub fn stage(name: &str) {
 /// Append one stage with a value to the boot timeline.
 pub fn stage_detail(name: &str, detail: &str) {
     boot::stage_detail(name, detail);
+}
+
+/// Raise or lower the overlay's rung while the app runs.
+///
+/// `RUST_LOG` wins over the setting, because whoever set it is already choosing the filter.
+pub fn set_verbose(enabled: bool) {
+    if std::env::var_os("RUST_LOG").is_some() {
+        return;
+    }
+
+    let Some(handle) = FILTER.get() else {
+        return;
+    };
+
+    let text = if enabled {
+        DEFAULT_FILTER.replace(OVERLAY_DIRECTIVE, OVERLAY_VERBOSE)
+    } else {
+        DEFAULT_FILTER.to_owned()
+    };
+
+    if let Err(error) = handle.reload(EnvFilter::new(text)) {
+        tracing::warn!(%error, "could not change the log filter");
+    }
+}
+
+/// The run every line of this process carries.
+pub fn run_id() -> Option<&'static str> {
+    RUN.get().map(String::as_str)
+}
+
+/// The session the lines from now on belong to, counting from one.
+pub fn start_session() -> u64 {
+    set_game(None);
+    SESSION.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+/// End the session, so lines from outside one carry no `session`.
+pub fn end_session() {
+    SESSION.store(0, Ordering::Relaxed);
+    set_game(None);
+}
+
+/// Mark the game this run hooked, as the id its lines carry.
+pub fn start_game() {
+    let stamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    set_game(Some(stamp.into()));
+}
+
+/// Replace the game a line belongs to.
+fn set_game(game: Option<Arc<str>>) {
+    if let Ok(mut held) = GAME.write() {
+        *held = game;
+    }
+}
+
+/// The session a line belongs to, when one is open.
+pub fn session_id() -> Option<u64> {
+    match SESSION.load(Ordering::Relaxed) {
+        0 => None,
+        id => Some(id),
+    }
+}
+
+/// The game a line belongs to, when a session found one.
+pub fn game_id() -> Option<String> {
+    GAME.read().ok()?.as_ref().map(|id| id.to_string())
 }
 
 /// The file the subscriber is writing, which is the newest log on disk.
@@ -112,56 +212,92 @@ pub fn current_log_file() -> Option<PathBuf> {
     })
 }
 
-/// Delete log files older than `max_age_days` from the log directory.
+/// Delete log files older than `max_age_days`, then the oldest until the directory fits.
 pub fn cleanup_old_logs(log_dir: &Path, max_age_days: u64) {
     let max_age = Duration::from_secs(max_age_days * 24 * 60 * 60);
+    let now = SystemTime::now();
+    let mut kept = Vec::new();
 
-    let entries = match fs::read_dir(log_dir) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::warn!("Failed to read log directory for cleanup: {}", e);
+    for (modified, size, path) in log_files(log_dir) {
+        let age = now.duration_since(modified).unwrap_or_default();
+
+        if age > max_age {
+            remove(&path);
+        } else {
+            kept.push((modified, size, path));
+        }
+    }
+
+    trim_to_budget(kept, MAX_TOTAL_BYTES);
+}
+
+/// Delete the oldest of `kept` until the directory holds no more than `budget`.
+fn trim_to_budget(kept: Vec<(SystemTime, u64, PathBuf)>, budget: u64) {
+    let mut total: u64 = kept.iter().map(|(_, size, _)| size).sum();
+    if total <= budget {
+        return;
+    }
+
+    let mut kept = kept;
+    kept.sort_by_key(|(modified, _, _)| *modified);
+
+    for (_, size, path) in kept {
+        if total <= budget {
             return;
+        }
+
+        remove(&path);
+        total = total.saturating_sub(size);
+    }
+}
+
+/// Delete one log file, reporting a failure that left it behind.
+fn remove(path: &Path) {
+    match fs::remove_file(path) {
+        Ok(()) => tracing::info!("Deleted old log file: {}", path.display()),
+        Err(error) => tracing::warn!(
+            "Failed to delete old log file {}: {}",
+            path.display(),
+            error
+        ),
+    }
+}
+
+/// Every file this module wrote, as its modified time, size and path.
+fn log_files(log_dir: &Path) -> Vec<(SystemTime, u64, PathBuf)> {
+    let entries = match fs::read_dir(log_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::warn!("Failed to read log directory for cleanup: {}", error);
+            return Vec::new();
         }
     };
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let file_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-
-        if !is_log_file(&file_name) {
-            continue;
-        }
-
-        let modified = match entry.metadata().and_then(|m| m.modified()) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-
-        let age = match SystemTime::now().duration_since(modified) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        if age > max_age {
-            if let Err(e) = fs::remove_file(&path) {
-                tracing::warn!("Failed to delete old log file {}: {}", path.display(), e);
-            } else {
-                tracing::info!("Deleted old log file: {}", path.display());
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            if !is_log_file(name.to_str()?) {
+                return None;
             }
-        }
-    }
+
+            let metadata = entry.metadata().ok()?;
+
+            Some((metadata.modified().ok()?, metadata.len(), entry.path()))
+        })
+        .collect()
 }
 
 /// Whether `file_name` is one of the files this module writes.
 fn is_log_file(file_name: &str) -> bool {
-    file_name.ends_with(".log")
-        && (file_name.starts_with("vinciskin.")
-            || file_name.starts_with("loader-")
-            || file_name == "boot.log"
-            || file_name == "panic.log")
+    if !file_name.ends_with(".log") {
+        return false;
+    }
+
+    file_name.starts_with("vinciskin.")
+        || file_name.starts_with("loader-")
+        || file_name.starts_with("boot.")
+        || file_name.starts_with("panic.")
 }
 
 /// The directory the log files live in.
@@ -195,7 +331,20 @@ pub(crate) fn default_log_dir() -> Option<PathBuf> {
     Some(std::env::temp_dir().join("vinciskin"))
 }
 
-/// Build the rolling file writer, answering its guard, writer and directory.
+/// Register the folders a user's account names, so no line has to carry them.
+fn register_environment_paths() {
+    for (name, placeholder) in [
+        ("USERPROFILE", "%USERPROFILE%"),
+        ("APPDATA", "%APPDATA%"),
+        ("LOCALAPPDATA", "%LOCALAPPDATA%"),
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            crate::redact::register(&value.to_string_lossy(), placeholder);
+        }
+    }
+}
+
+/// Build the file writer, answering its guard, writer and directory.
 fn build_file_writer() -> (
     Option<WorkerGuard>,
     Option<non_blocking::NonBlocking>,
@@ -215,24 +364,9 @@ fn build_file_writer() -> (
         return (None, None, None);
     }
 
-    let file_appender = match rolling::RollingFileAppender::builder()
-        .rotation(rolling::Rotation::DAILY)
-        .filename_prefix("vinciskin")
-        .filename_suffix("log")
-        .build(&log_dir)
-    {
-        Ok(appender) => appender,
-        Err(e) => {
-            eprintln!(
-                "Failed to create the log file in {}: {}",
-                log_dir.display(),
-                e
-            );
-            return (None, None, None);
-        }
-    };
+    let sink = writer::RedactingWriter::new(writer::DailyFile::new(log_dir.clone()));
+    let (writer, guard) = non_blocking(sink);
 
-    let (writer, guard) = non_blocking(file_appender);
     (Some(guard), Some(writer), Some(log_dir))
 }
 
@@ -255,12 +389,7 @@ fn log_environment() {
 
         if webview2 == "missing" {
             boot::stage("webview2-missing");
-        } else if webview2
-            .split('.')
-            .next()
-            .and_then(|major| major.parse::<u32>().ok())
-            .is_some_and(|major| major < 105)
-        {
+        } else if vinciskin_core::diagnostics::windows::webview2_too_old(webview2) {
             tracing::warn!(
                 webview2,
                 "WebView2 is older than the frontend's chrome105 target"
@@ -302,52 +431,10 @@ fn windows_name(build: u32) -> &'static str {
     }
 }
 
-/// The Evergreen WebView2 runtime's version, from the registry either install writes.
+/// The Evergreen WebView2 runtime's version, as the diagnostics read it too.
 #[cfg(target_os = "windows")]
 fn webview2_version() -> Option<String> {
-    use windows_sys::Win32::System::Registry::{
-        RegGetValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ,
-    };
-
-    const MACHINE_KEY: &str =
-        r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
-    const USER_KEY: &str =
-        r"Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
-
-    fn read(root: HKEY, key: &str) -> Option<String> {
-        let key = wide(key);
-        let value = wide("pv");
-        let mut buffer = [0u16; 128];
-        let mut size = (buffer.len() * 2) as u32;
-
-        // SAFETY: both strings are null-terminated, and `buffer` is `size`
-        // bytes of writable storage.
-        let status = unsafe {
-            RegGetValueW(
-                root,
-                key.as_ptr(),
-                value.as_ptr(),
-                RRF_RT_REG_SZ,
-                std::ptr::null_mut(),
-                buffer.as_mut_ptr().cast(),
-                &mut size,
-            )
-        };
-        if status != 0 || size < 2 {
-            return None;
-        }
-
-        let length = (size as usize / 2).saturating_sub(1);
-        Some(String::from_utf16_lossy(&buffer[..length]))
-    }
-
-    read(HKEY_LOCAL_MACHINE, MACHINE_KEY).or_else(|| read(HKEY_CURRENT_USER, USER_KEY))
-}
-
-/// A null-terminated UTF-16 string.
-#[cfg(target_os = "windows")]
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(std::iter::once(0)).collect()
+    vinciskin_core::diagnostics::windows::webview2_version()
 }
 
 /// Write a panic line to the log and to `panic.log` before the process ends.
@@ -371,7 +458,7 @@ fn install_panic_hook(log_dir: Option<PathBuf>) {
                 .append(true)
                 .open(dir.join("panic.log"))
                 .and_then(|mut file| {
-                    file.write_all(line.as_bytes())?;
+                    file.write_all(crate::redact::line(&line).as_bytes())?;
                     file.flush()
                 });
         }
@@ -401,9 +488,15 @@ mod boot {
 
     static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
-    /// Point the timeline at `dir`, once per process.
+    /// Point the timeline at `dir`, once per process, rotating a file too large to read.
     pub fn init(dir: Option<&Path>) {
-        let _ = PATH.set(dir.map(|dir| dir.join("boot.log")));
+        let path = dir.map(|dir| dir.join("boot.log"));
+
+        if let Some(path) = &path {
+            rotate_if_large(path);
+        }
+
+        let _ = PATH.set(path);
     }
 
     /// Append one stage.
@@ -420,23 +513,54 @@ mod boot {
         write(&format!("stage={name} detail=\"{detail}\""));
     }
 
+    /// Keep the timeline to the last run, by moving a file past the cap aside.
+    fn rotate_if_large(path: &Path) {
+        let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        if size <= MAX_BOOT_BYTES {
+            return;
+        }
+
+        let rotated = path.with_file_name("boot.1.log");
+        let _ = fs::remove_file(&rotated);
+        let _ = fs::rename(path, rotated);
+    }
+
     fn write(line: &str) {
         let Some(path) = PATH.get().and_then(Option::as_ref) else {
             return;
         };
+
         let entry = format!("{} {line}\n", now());
         let _ = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
             .and_then(|mut file| {
-                file.write_all(entry.as_bytes())?;
+                file.write_all(crate::redact::line(&entry).as_bytes())?;
                 file.flush()
             });
     }
 }
 
-/// The timestamp every line of the boot and panic logs uses.
+/// The timestamp every line carries, local time so it matches the file it is in.
 fn now() -> String {
     chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, false)
+}
+
+/// A random-looking id for this run, narrow enough to read in a line.
+fn new_run_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos() as u64)
+        .unwrap_or(0);
+    let pid = u64::from(std::process::id());
+
+    /* A 32-bit mix of the two: the id only has to tell this process's lines from the last
+    run's, and eight hex digits is what a person can carry into an issue. */
+    let mut mixed = nanos ^ (pid << 32);
+    mixed ^= mixed >> 33;
+    mixed = mixed.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    mixed ^= mixed >> 33;
+
+    format!("{:08x}", mixed as u32)
 }

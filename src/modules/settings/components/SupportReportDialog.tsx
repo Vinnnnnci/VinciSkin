@@ -16,6 +16,17 @@ const PROBLEMS = [
   { value: "other", label: m.support_report_problem_other },
 ] as const;
 
+/** What one file of the zip is, for a reader who does not open JSON for a living. */
+function fileRole(path: string): string {
+  if (path === "report.md") return m.support_report_role_summary();
+  if (path === "manifest.json") return m.support_report_role_manifest();
+  if (path.startsWith("incidents/")) return m.support_report_role_incident();
+  if (path.startsWith("game-log/")) return m.support_report_role_game_log();
+  if (path.startsWith("log/")) return m.support_report_role_log();
+
+  return m.support_report_role_machine();
+}
+
 interface SupportReportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -88,6 +99,8 @@ function SupportReportContent({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <>
       <Dialog.Body className="flex h-[62vh] flex-col gap-4 overflow-hidden">
+        <p className="text-sm text-surface-400">{m.support_report_intro()}</p>
+
         <div className="grid gap-4 sm:grid-cols-2">
           <RadioGroup.Root value={problem} onValueChange={setProblem}>
             <RadioGroup.Label>{m.support_report_problem_label()}</RadioGroup.Label>
@@ -153,6 +166,7 @@ function SupportReportContent({ open, onClose }: { open: boolean; onClose: () =>
             </ul>
 
             <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <p className="text-xs text-surface-500 select-none">{fileRole(shown?.path ?? "")}</p>
               <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-surface-700 bg-surface-900 p-3 text-xs whitespace-pre-wrap select-text">
                 {shown?.text ?? ""}
               </pre>

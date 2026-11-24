@@ -1,11 +1,17 @@
-import { ArrowClockwiseIcon, ClipboardTextIcon, StethoscopeIcon } from "@phosphor-icons/react";
+import {
+  ArrowClockwiseIcon,
+  ClipboardTextIcon,
+  LifebuoyIcon,
+  StethoscopeIcon,
+} from "@phosphor-icons/react";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 
 import { AlertBox, Button, Separator, Spinner, Tabs, useToast } from "@/components";
-import { errorSummary } from "@/i18n";
+import { errorSummary, m } from "@/i18n";
 import type { DiagnosticReport } from "@/lib/tauri";
 import { DiagnosticsReportView, GamesTab, useDiagnostics } from "@/modules/diagnostics";
 import { SuspectModAction } from "@/modules/library";
+import { supportReportDialog } from "@/stores/supportReportDialog";
 
 import type { DiagnosticsTab } from "../routes/diagnostics";
 
@@ -106,6 +112,7 @@ function SystemTab() {
             settings or a Windows update. All checks are read-only — fixes are shown as commands you
             can copy and run in an elevated terminal.
           </p>
+          <p className="mt-1 text-sm text-surface-400">{m.support_report_diagnostics_hint()}</p>
           {report && (
             <p className="mt-1 text-xs text-surface-500">
               Last run: {formatGeneratedAt(report.generatedAt)} · VinciSkin v{report.appVersion}
@@ -113,6 +120,14 @@ function SystemTab() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => supportReportDialog.getState().open()}
+            left={<LifebuoyIcon weight="bold" className="h-4 w-4" />}
+          >
+            {m.support_report_action()}
+          </Button>
           <Button
             variant="ghost"
             size="sm"

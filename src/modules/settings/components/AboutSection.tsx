@@ -47,6 +47,7 @@ export function AboutSection({ appInfo }: AboutSectionProps) {
           </div>
         </div>
         <p className="mt-3 text-sm text-surface-400">{m.settings_about_description()}</p>
+        <p className="mt-1 text-xs text-surface-500">{m.settings_about_report_hint()}</p>
         <div className="mt-4 flex items-center gap-4 border-t border-surface-600 pt-4">
           <p className="text-xs text-surface-500 select-none">
             {m.settings_about_free_copy_hint()}

@@ -25,7 +25,7 @@ export function errorActions(error: AppError): ErrorAction[] {
       },
     },
     {
-      label: m.support_report_help_action(),
+      label: m.support_report_action(),
       onClick: () => supportReportDialog.getState().open(),
     },
   ];

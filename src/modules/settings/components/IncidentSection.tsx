@@ -1,8 +1,10 @@
-import { FileTextIcon } from "@phosphor-icons/react";
+import { FileTextIcon, LifebuoyIcon } from "@phosphor-icons/react";
 import { type KeyboardEvent, useEffect, useState } from "react";
 
-import { FieldControl, SectionCard, Switch } from "@/components";
+import { Button, FieldControl, SectionCard, Switch } from "@/components";
+import { m } from "@/i18n";
 import type { Settings } from "@/lib/tauri";
+import { supportReportDialog } from "@/stores/supportReportDialog";
 
 import { SettingGroup } from "./SettingGroup";
 import { SettingRow } from "./SettingRow";
@@ -49,13 +51,31 @@ export function IncidentSection({ settings, onSave }: IncidentSectionProps) {
 
         <SettingRow
           setting="verbosePatcherLogging"
-          description="The injection loader writes its own output to the log"
-          hint="The loader keeps only warnings otherwise. Turn this on before reproducing a problem, then send the log with the support report."
+          description="The injection loader's full output goes into the log"
+          hint="For a skin that says it applied while the game looks unchanged: turn this on, reproduce it once, then send a support report."
           control={
             <Switch
               checked={settings.verbosePatcherLogging}
               onCheckedChange={(checked) => onSave({ ...settings, verbosePatcherLogging: checked })}
             />
+          }
+        />
+      </SettingGroup>
+
+      <SettingGroup id="general.supportReport" title="Support report">
+        <SettingRow
+          kind="action"
+          title="Send what went wrong"
+          description={m.support_report_section_description()}
+          control={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => supportReportDialog.getState().open()}
+            >
+              <LifebuoyIcon className="h-4 w-4" weight="bold" />
+              {m.support_report_action()}
+            </Button>
           }
         />
       </SettingGroup>

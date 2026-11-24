@@ -1,26 +1,28 @@
 # 日志与诊断包设计
 
-- **状态**：部分实现（2026-11-24）。换肤链路修复、loader 日志、启动/panic/UI 日志、Windows 版本显示、脱敏写入器、run/session/game id、5 MB 轮转与总量上限、诊断页的 WebView2/架构/.NET 检查已落地。诊断包、`--report`、GPU 检查、`ui-ready` 看门狗仍未落地。
+- **状态**：部分实现（2026-11-25）。换肤链路修复、loader 日志、启动/panic/UI 日志、Windows 版本显示、脱敏写入器、run/session/game id、5 MB 轮转与总量上限、诊断页的 WebView2/架构/.NET 检查、诊断包构建与预览保存已落地。`--report`、启动失败原生对话框、GPU 检查、`ui-ready` 看门狗仍未落地。
 - **范围**：`src-tauri/src/logging*`、`src-tauri/src/setup.rs`、`src-tauri/src/main.rs`、`crates/vinciskin-core/src/diagnostics`、安装器、设置页与诊断页
 - **目标**：用户说“Win10 用不了”时，一次操作能拿到定位问题的证据。软件根本打不开时也要有证据。
 - **非目标**：默认上传、默认遥测、自动修复、全量带走游戏日志
 
 ## 实现进度
 
-| 项                                                               | 状态   | 位置                                                           |
-| ---------------------------------------------------------------- | ------ | -------------------------------------------------------------- |
-| 换肤链路：失败不吞、应用检查宿主、游戏已运行提示、跟随先启动注入 | 已实现 | `CnCatalog.tsx`、`CnSkinGrid.tsx`、`CnSessionControl.tsx`      |
-| loader 输出捕获、`injected` 以 DLL ack 为准、job 结束进程树      | 已实现 | `src-tauri/src/patcher.rs`                                     |
-| 启动阶段日志、panic 日志、WebView2/OS 环境行                     | 已实现 | `src-tauri/src/logging/`、`main.rs`、`setup.rs`                |
-| 前端错误回传、IPC 失败日志                                       | 已实现 | `commands/app.rs`、`error.rs`、`main.tsx`、`ErrorBoundary.tsx` |
-| 日志文件路径与“打开日志文件”                                     | 已实现 | `commands/app.rs`、`commands/shell.rs`                         |
-| 诊断页 Windows 11 显示                                           | 已实现 | `diagnostics/windows.rs`                                       |
-| 脱敏写入器：注册值 + 用户目录/URL/邮箱模式                       | 已实现 | `redact.rs`、`logging/writer.rs`                               |
-| run/session/game id 写在每行                                     | 已实现 | `logging/format.rs`、`logging/mod.rs`、`patcher.rs`            |
-| 5 MB 单文件轮转、50 MB 总量、`boot.log` 256 KB                   | 已实现 | `logging/writer.rs`、`logging/mod.rs`                          |
-| `verbosePatcherLogging` 接到 reload handle                       | 已实现 | `logging/mod.rs`、`state.rs`、`commands/settings.rs`           |
-| 诊断页 WebView2、64 位、.NET Framework 4.8                       | 已实现 | `diagnostics/windows.rs`                                       |
-| 诊断包 zip、`--report`、GPU 检查、`ui-ready` 看门狗              | 未实现 | 见下文设计                                                     |
+| 项                                                                                       | 状态   | 位置                                                               |
+| ---------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------ |
+| 换肤链路：失败不吞、应用检查宿主、游戏已运行提示、跟随先启动注入                         | 已实现 | `CnCatalog.tsx`、`CnSkinGrid.tsx`、`CnSessionControl.tsx`          |
+| loader 输出捕获、`injected` 以 DLL ack 为准、job 结束进程树                              | 已实现 | `src-tauri/src/patcher.rs`                                         |
+| 启动阶段日志、panic 日志、WebView2/OS 环境行                                             | 已实现 | `src-tauri/src/logging/`、`main.rs`、`setup.rs`                    |
+| 前端错误回传、IPC 失败日志                                                               | 已实现 | `commands/app.rs`、`error.rs`、`main.tsx`、`ErrorBoundary.tsx`     |
+| 日志文件路径与“打开日志文件”                                                             | 已实现 | `commands/app.rs`、`commands/shell.rs`                             |
+| 诊断页 Windows 11 显示                                                                   | 已实现 | `diagnostics/windows.rs`                                           |
+| 脱敏写入器：注册值 + 用户目录/URL/邮箱模式                                               | 已实现 | `redact.rs`、`logging/writer.rs`                                   |
+| run/session/game id 写在每行                                                             | 已实现 | `logging/format.rs`、`logging/mod.rs`、`patcher.rs`                |
+| 5 MB 单文件轮转、50 MB 总量、`boot.log` 256 KB                                           | 已实现 | `logging/writer.rs`、`logging/mod.rs`                              |
+| `verbosePatcherLogging` 接到 reload handle                                               | 已实现 | `logging/mod.rs`、`state.rs`、`commands/settings.rs`               |
+| 诊断页 WebView2、64 位、.NET Framework 4.8                                               | 已实现 | `diagnostics/windows.rs`                                           |
+| 诊断包构建器：report.md、manifest、system/settings/library/patcher、incidents、logs、zip | 已实现 | `crates/vinciskin-core/src/support_report/`、`commands/support.rs` |
+| 预览对话框、保存、复制摘要、设置页入口                                                   | 已实现 | `SupportReportDialog.tsx`、`AboutSection.tsx`                      |
+| `--report` 无窗口路径、启动失败原生对话框、GPU 检查、`ui-ready` 看门狗                   | 未实现 | 见下文设计                                                         |
 
 ## 1. 结论
 

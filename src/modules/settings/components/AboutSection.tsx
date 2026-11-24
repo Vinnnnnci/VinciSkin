@@ -1,4 +1,4 @@
-import { FileTextIcon, ScrollIcon } from "@phosphor-icons/react";
+import { FileTextIcon, LifebuoyIcon, ScrollIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
 import { Button, ExternalLink, SectionCard } from "@/components";
@@ -6,6 +6,7 @@ import { m } from "@/i18n";
 import { type AppInfo, revealPath } from "@/lib/tauri";
 
 import { LicensesDialog } from "./LicensesDialog";
+import { SupportReportDialog } from "./SupportReportDialog";
 
 const SPONSOR_URL = "https://ifdian.net/a/Vinnnnnci";
 
@@ -15,6 +16,7 @@ interface AboutSectionProps {
 
 export function AboutSection({ appInfo }: AboutSectionProps) {
   const [licensesOpen, setLicensesOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   return (
     <SectionCard title={m.settings_about_title()}>
@@ -28,12 +30,18 @@ export function AboutSection({ appInfo }: AboutSectionProps) {
               </p>
             )}
           </div>
-          {appInfo?.logFilePath && (
-            <Button variant="outline" size="sm" onClick={() => revealPath(appInfo.logFilePath!)}>
-              <FileTextIcon className="h-4 w-4" weight="bold" />
-              {m.settings_about_open_log_action()}
+          <div className="flex items-center gap-2">
+            {appInfo?.logFilePath && (
+              <Button variant="outline" size="sm" onClick={() => revealPath(appInfo.logFilePath!)}>
+                <FileTextIcon className="h-4 w-4" weight="bold" />
+                {m.settings_about_open_log_action()}
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => setReportOpen(true)}>
+              <LifebuoyIcon className="h-4 w-4" weight="bold" />
+              {m.settings_about_report_action()}
             </Button>
-          )}
+          </div>
         </div>
         <p className="mt-3 text-sm text-surface-400">{m.settings_about_description()}</p>
         <div className="mt-4 flex items-center gap-4 border-t border-surface-600 pt-4">
@@ -52,6 +60,7 @@ export function AboutSection({ appInfo }: AboutSectionProps) {
         </div>
       </div>
       <LicensesDialog open={licensesOpen} onOpenChange={setLicensesOpen} />
+      <SupportReportDialog open={reportOpen} onOpenChange={setReportOpen} />
     </SectionCard>
   );
 }

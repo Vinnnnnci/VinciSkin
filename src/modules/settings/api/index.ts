@@ -12,6 +12,14 @@ export { useMapDecorations } from "./useMapDecorations";
 export { useSaveSettings } from "./useSaveSettings";
 export { useSettingDefaults } from "./useSettingDefaults";
 export { useSettings } from "./useSettings";
+export {
+  type SavedSupportReport,
+  type SaveReportArgs,
+  type SupportReportFile,
+  type SupportReportPreview,
+  useSaveSupportReport,
+  useSupportReport,
+} from "./useSupportReport";
 export { useSyncHashtables } from "./useSyncHashtables";
 export { ACCENT_PRESETS, BRAND_HUE, useTheme, VINCI_PRESET } from "./useTheme";
 export {

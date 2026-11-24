@@ -9,6 +9,7 @@ import {
   type HashtableCacheStatus,
   type HashtableUpdateCheck,
   type Settings,
+  type SupportReportPreview,
 } from "@/lib/tauri";
 import { queryFn, queryFnWithArgs } from "@/utils/query";
 
@@ -55,6 +56,20 @@ export const settingsQueries = {
       queryKey: settingsKeys.thirdPartyLicenses(),
       queryFn: fetchThirdPartyLicenses,
       staleTime: Infinity,
+    }),
+
+  /* Built on demand, because the whole point is that it is the bundle as it stands now: the
+     checks that just ran, the library as it is indexed, and the log the last run wrote. The
+     notes sit in the key because they are part of report.md, so the saved zip matches the
+     preview rather than hashing one more line into it. */
+  supportReport: (problem: string, notes: string, enabled: boolean) =>
+    queryOptions<SupportReportPreview, AppError>({
+      queryKey: settingsKeys.supportReport(problem, notes),
+      queryFn: queryFnWithArgs(api.buildSupportReport, problem, notes),
+      enabled,
+      staleTime: 0,
+      gcTime: 0,
+      retry: false,
     }),
 } as const;
 

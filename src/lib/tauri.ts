@@ -381,6 +381,30 @@ export interface CnAutoStatus {
 export type { Result } from "@/utils/result";
 export { isErr, isOk, match, unwrap, unwrapOr } from "@/utils/result";
 
+/** One file a support report carries, with the text the preview shows. */
+export interface SupportReportFile {
+  path: string;
+  bytes: number;
+  /** Whether `text` stops before the file does. */
+  truncated: boolean;
+  text: string;
+}
+
+/** The report as the preview lists it. */
+export interface SupportReportPreview {
+  summary: string;
+  totalBytes: number;
+  suggestedName: string;
+  files: SupportReportFile[];
+}
+
+/** What saving a report wrote. */
+export interface SavedSupportReport {
+  path: string;
+  bytes: number;
+  files: number;
+}
+
 type IpcResponse<T> = { ok: true; value: T } | { ok: false; error: AppError };
 
 /**
@@ -617,6 +641,12 @@ export const api = {
   // Shell
   revealInExplorer: (path: string) => invokeResult<void>("reveal_in_explorer", { path }),
   minimizeToTray: () => invokeResult<void>("minimize_to_tray"),
+
+  // Support report
+  buildSupportReport: (problem: string, notes: string) =>
+    invokeResult<SupportReportPreview>("build_support_report", { problem, notes }),
+  saveSupportReport: (path: string, problem: string, notes: string) =>
+    invokeResult<SavedSupportReport>("save_support_report", { path, problem, notes }),
 
   // Storage
   detectStorageMedium: (path: string) =>

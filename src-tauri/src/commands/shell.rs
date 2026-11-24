@@ -12,39 +12,48 @@ pub async fn reveal_in_explorer(path: String) -> IpcResult<()> {
 pub(crate) fn reveal_in_explorer_inner(path: &str) -> AppResult<()> {
     let path = PathBuf::from(path);
 
-    // Get the parent directory if it's a file
-    let dir = if path.is_file() {
-        path.parent().map(|p| p.to_path_buf()).unwrap_or(path)
-    } else {
-        path
-    };
-
     #[cfg(target_os = "windows")]
     {
-        let dir_str = dir.to_string_lossy().replace('/', "\\");
+        let target = if path.is_file() {
+            format!("/select,{}", path.to_string_lossy().replace('/', "\\"))
+        } else {
+            path.to_string_lossy().replace('/', "\\")
+        };
+
         std::process::Command::new("explorer")
-            .arg(dir_str)
+            .arg(target)
             .spawn()
             .map_err(|e| AppError::Other(format!("Failed to open explorer: {}", e)))?;
+
+        return Ok(());
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "windows"))]
     {
-        std::process::Command::new("open")
-            .arg(dir)
-            .spawn()
-            .map_err(|e| AppError::Other(format!("Failed to open Finder: {}", e)))?;
-    }
+        let dir = if path.is_file() {
+            path.parent().map(|p| p.to_path_buf()).unwrap_or(path)
+        } else {
+            path
+        };
 
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(dir)
-            .spawn()
-            .map_err(|e| AppError::Other(format!("Failed to open file manager: {}", e)))?;
-    }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg(dir)
+                .spawn()
+                .map_err(|e| AppError::Other(format!("Failed to open Finder: {}", e)))?;
+        }
 
-    Ok(())
+        #[cfg(target_os = "linux")]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(dir)
+                .spawn()
+                .map_err(|e| AppError::Other(format!("Failed to open file manager: {}", e)))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Minimizes the window to the system tray if the setting is enabled,

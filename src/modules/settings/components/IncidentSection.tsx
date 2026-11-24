@@ -46,6 +46,18 @@ export function IncidentSection({ settings, onSave }: IncidentSectionProps) {
             />
           }
         />
+
+        <SettingRow
+          setting="verbosePatcherLogging"
+          description="The injection loader writes its own output to the log"
+          hint="The loader keeps only warnings otherwise. Turn this on before reproducing a problem, then send the log with the support report."
+          control={
+            <Switch
+              checked={settings.verbosePatcherLogging}
+              onCheckedChange={(checked) => onSave({ ...settings, verbosePatcherLogging: checked })}
+            />
+          }
+        />
       </SettingGroup>
     </SectionCard>
   );

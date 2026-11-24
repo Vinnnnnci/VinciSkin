@@ -1,4 +1,4 @@
-﻿import { m } from "@/i18n";
+import { m } from "@/i18n";
 
 import type { SettingKey } from "./settingKey";
 import { DEFAULT_SETTINGS_TAB, isSettingsTab, type SettingsTab } from "./tabs";
@@ -44,6 +44,11 @@ const INDEX = [
     key: "keepIncidents",
     title: "Keep incidents",
     aliases: ["patching.keepIncidents"],
+  },
+  {
+    id: "general.verbosePatcherLogging",
+    key: "verbosePatcherLogging",
+    title: "Verbose patcher logging",
   },
 
   { id: "library.modStoragePath", key: "modStoragePath", title: "Storage location" },

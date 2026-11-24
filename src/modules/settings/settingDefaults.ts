@@ -89,6 +89,7 @@ const SETTING_FORMAT: Partial<Record<SettingKey, SettingFormat>> = {
 
   readGameLog: onOff,
   keepIncidents: plain,
+  verbosePatcherLogging: onOff,
 
   theme: titleCase,
   accentColor: accentName,

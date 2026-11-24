@@ -12,6 +12,8 @@ use super::{CheckDetail, check_ok};
 const MIN_OK_BUILD: u32 = 19045;
 #[cfg(target_os = "windows")]
 const KNOWN_BAD_BUILD: u32 = 22000;
+#[cfg(target_os = "windows")]
+const WINDOWS_11_BUILD: u32 = 22000;
 
 /// Read OS major/minor/build from the kernel-shared user data page (KUSER_SHARED_DATA).
 /// This avoids `GetVersionExW` lying when the manager isn't manifested for the current OS.
@@ -30,7 +32,12 @@ fn read_kuser_version() -> (u32, u32, u32) {
 #[cfg(target_os = "windows")]
 pub fn check_version() -> Check {
     let (major, minor, build) = read_kuser_version();
-    let display = format!("Windows {}.{}.{}", major, minor, build);
+    let name = if build >= WINDOWS_11_BUILD {
+        "Windows 11"
+    } else {
+        "Windows 10"
+    };
+    let display = format!("{name} (build {build})");
     if build < MIN_OK_BUILD || build == KNOWN_BAD_BUILD {
         let mut c = check(
             "windows.version",

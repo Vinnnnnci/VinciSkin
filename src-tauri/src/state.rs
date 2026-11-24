@@ -369,7 +369,7 @@ mod tests {
         };
         let json = serde_json::to_value(&settings).unwrap();
         assert_eq!(json["leaguePath"], "/game");
-        assert_eq!(json["enforceSkinhackScan"], true);
+        assert_eq!(json["autoCategorizationEnabled"], true);
         assert!(json.get("config").is_none());
     }
 

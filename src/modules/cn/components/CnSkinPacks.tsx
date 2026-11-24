@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { AlertBox, Button, FormField, useConfirm, useToast } from "@/components";
 import { errorSummary, m } from "@/i18n";
+import { errorActions } from "@/lib/errorActions";
 import type { CnPackProgress, PackSwap } from "@/lib/tauri";
 
 import {
@@ -62,7 +63,10 @@ export function CnSkinPacks() {
           m.cn_pack_applied_title(),
           m.cn_pack_applied_description({ count: written.length }),
         ),
-      onError: (error) => toast.error(m.cn_pack_import_failed_title(), errorSummary(error)),
+      onError: (error) =>
+        toast.error(m.cn_pack_import_failed_title(), errorSummary(error), {
+          actions: errorActions(error),
+        }),
     });
   }
 
@@ -86,7 +90,10 @@ export function CnSkinPacks() {
           m.cn_pack_applied_description({ count: written.length }),
         );
       },
-      onError: (error) => toast.error(m.cn_pack_download_failed_title(), errorSummary(error)),
+      onError: (error) =>
+        toast.error(m.cn_pack_download_failed_title(), errorSummary(error), {
+          actions: errorActions(error),
+        }),
     });
   }
 
@@ -97,7 +104,10 @@ export function CnSkinPacks() {
       { archive: target.archive },
       {
         onSuccess: () => toast.success(m.cn_pack_restored_title()),
-        onError: (error) => toast.error(m.cn_pack_restore_failed_title(), errorSummary(error)),
+        onError: (error) =>
+          toast.error(m.cn_pack_restore_failed_title(), errorSummary(error), {
+            actions: errorActions(error),
+          }),
       },
     );
   }
@@ -117,7 +127,10 @@ export function CnSkinPacks() {
       { archive: target.archive },
       {
         onSuccess: () => toast.success(m.cn_pack_forgotten()),
-        onError: (error) => toast.error(m.cn_pack_forget_failed_title(), errorSummary(error)),
+        onError: (error) =>
+          toast.error(m.cn_pack_forget_failed_title(), errorSummary(error), {
+            actions: errorActions(error),
+          }),
       },
     );
   }

@@ -3,6 +3,7 @@ import { CircleAlert, CircleCheck, CircleX, Info, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { describeError, errorMessage } from "@/i18n/errors";
+import { errorActions } from "@/lib/errorActions";
 import { m } from "@/paraglide/messages";
 import { useNotificationsStore } from "@/stores/notifications";
 import { twMerge } from "@/utils";
@@ -40,6 +41,8 @@ export interface ToastData {
 export interface ToastOptions {
   /** Also record the toast in the notification center. Off by default. */
   notify?: boolean;
+  /** What the toast offers beside its message, in one row under it. */
+  actions?: ToastAction[];
 }
 
 /** A handle on a toast that stays open until the work behind it ends. */
@@ -71,8 +74,12 @@ export function reportUnhandledFailure(error: unknown): void {
   toastManager.add({
     title: copy.title,
     description: copy.detail ?? copy.description,
-    data: { type: "error", timeout: 7000 },
-    timeout: 7000,
+    data: {
+      type: "error",
+      timeout: 10000,
+      actions: isAppError(error) ? errorActions(error) : [],
+    },
+    timeout: 10000,
   });
 }
 
@@ -368,7 +375,7 @@ export function useToast() {
         return toastManager.add({
           title,
           description,
-          data: { type: "error", timeout: 7000 },
+          data: { type: "error", timeout: 7000, actions: options?.actions ?? [] },
           timeout: 7000,
         });
       },

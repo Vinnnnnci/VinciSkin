@@ -11,6 +11,7 @@ import { ToastProvider } from "./components/ToastProvider";
 import { queryClient } from "./lib/query";
 import { api } from "./lib/tauri";
 import { useTheme } from "./modules/settings";
+import { SupportReportHost } from "./modules/settings/components/SupportReportHost";
 import { routeTree } from "./routeTree.gen";
 
 const router = createRouter({ routeTree });
@@ -65,6 +66,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <RouterProvider router={router} />
           </ErrorBoundary>
           <ConfirmHost />
+          <SupportReportHost />
         </ToastProvider>
       </ThemeProvider>
     </QueryClientProvider>

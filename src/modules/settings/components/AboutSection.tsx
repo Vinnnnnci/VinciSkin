@@ -4,9 +4,9 @@ import { useState } from "react";
 import { Button, ExternalLink, SectionCard } from "@/components";
 import { m } from "@/i18n";
 import { type AppInfo, revealPath } from "@/lib/tauri";
+import { supportReportDialog } from "@/stores/supportReportDialog";
 
 import { LicensesDialog } from "./LicensesDialog";
-import { SupportReportDialog } from "./SupportReportDialog";
 
 const SPONSOR_URL = "https://ifdian.net/a/Vinnnnnci";
 
@@ -16,7 +16,6 @@ interface AboutSectionProps {
 
 export function AboutSection({ appInfo }: AboutSectionProps) {
   const [licensesOpen, setLicensesOpen] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
 
   return (
     <SectionCard title={m.settings_about_title()}>
@@ -37,7 +36,11 @@ export function AboutSection({ appInfo }: AboutSectionProps) {
                 {m.settings_about_open_log_action()}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => setReportOpen(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => supportReportDialog.getState().open()}
+            >
               <LifebuoyIcon className="h-4 w-4" weight="bold" />
               {m.settings_about_report_action()}
             </Button>
@@ -60,7 +63,6 @@ export function AboutSection({ appInfo }: AboutSectionProps) {
         </div>
       </div>
       <LicensesDialog open={licensesOpen} onOpenChange={setLicensesOpen} />
-      <SupportReportDialog open={reportOpen} onOpenChange={setReportOpen} />
     </SectionCard>
   );
 }

@@ -8,4 +8,5 @@ export * from "./modHealthDrawer";
 export * from "./notifications";
 export * from "./officialNotice";
 export * from "./playSession";
+export * from "./supportReportDialog";
 export * from "./workshopLayout";

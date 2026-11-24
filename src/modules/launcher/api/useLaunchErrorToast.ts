@@ -2,6 +2,7 @@ import { useCallback } from "react";
 
 import { useToast } from "@/components";
 import { describeLaunchError, type ErrorCopy, errorSummary, m } from "@/i18n";
+import { errorActions } from "@/lib/errorActions";
 import type { AppError } from "@/lib/tauri";
 
 /** A launch can also fail before the launcher is reached, and that failure keeps the launch's framing. */
@@ -25,7 +26,7 @@ export function useLaunchErrorToast() {
       if (error.code === "LAUNCHER" && error.error.kind === "STOPPED") return;
 
       const { title, description, detail } = launchErrorCopy(error);
-      toast.error(title, description ?? detail);
+      toast.error(title, description ?? detail, { actions: errorActions(error) });
       console.error("Failed to launch League:", error);
     },
     [toast],

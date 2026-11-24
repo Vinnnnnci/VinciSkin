@@ -1,5 +1,6 @@
 import { AlertBox, Button, EmptyState, Spinner, useConfirm, useToast } from "@/components";
 import { describeError, errorMessage, errorSummary, m } from "@/i18n";
+import { errorActions } from "@/lib/errorActions";
 import {
   api,
   isOk,
@@ -80,7 +81,9 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
           onClick: () => {
             void api.cn.startPatcher().then((result) => {
               if (!isOk(result)) {
-                toast.error(m.cn_inject_failed_title(), errorMessage(result.error));
+                toast.error(m.cn_inject_failed_title(), errorMessage(result.error), {
+                  actions: errorActions(result.error),
+                });
               }
             });
           },
@@ -102,7 +105,10 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
         { alias: hero.alias },
         {
           onSuccess: () => toast.success(m.cn_skin_reset()),
-          onError: (error) => toast.error(m.cn_restore_skin_failed_title(), errorSummary(error)),
+          onError: (error) =>
+            toast.error(m.cn_restore_skin_failed_title(), errorSummary(error), {
+              actions: errorActions(error),
+            }),
         },
       );
       return;
@@ -124,7 +130,10 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
         onSuccess: () => {
           void announceApply(picked.name);
         },
-        onError: (error) => toast.error(m.cn_apply_skin_failed_title(), errorSummary(error)),
+        onError: (error) =>
+          toast.error(m.cn_apply_skin_failed_title(), errorSummary(error), {
+            actions: errorActions(error),
+          }),
       },
     );
   }
@@ -144,7 +153,10 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
       { alias: hero.alias },
       {
         onSuccess: () => toast.success(m.cn_swap_forgotten()),
-        onError: (error) => toast.error(m.cn_swap_forget_failed_title(), errorSummary(error)),
+        onError: (error) =>
+          toast.error(m.cn_swap_forget_failed_title(), errorSummary(error), {
+            actions: errorActions(error),
+          }),
       },
     );
   }

@@ -7,7 +7,7 @@
 <div align="center">
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E7%88%B1%E5%8F%91%E7%94%B5-946ce6?style=for-the-badge)](https://ifdian.net/a/Vinnnnnci)
-[![Download](https://img.shields.io/badge/Download-v1.23.0-0078D4?style=for-the-badge&logo=github)](https://github.com/Vinnnnnci/VinciSkin/releases/tag/v1.23.0)
+[![Download](https://img.shields.io/badge/Download-v1.23.1-0078D4?style=for-the-badge&logo=github)](https://github.com/Vinnnnnci/VinciSkin/releases/tag/v1.23.1)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge)](LICENSE)
 [![Windows 10+](https://img.shields.io/badge/Windows-10+-0078D4?style=for-the-badge&logo=windows)](#下载)
 
@@ -53,7 +53,7 @@ VinciSkin 是一个面向英雄联盟国服的 mod 管理器，只支持 Windows
 
 ## 下载
 
-**[v1.23.0 安装包（zip）](https://github.com/Vinnnnnci/VinciSkin/releases/tag/v1.23.0)**
+**[v1.23.1 安装包（zip）](https://github.com/Vinnnnnci/VinciSkin/releases/tag/v1.23.1)**
 
 解压到任意文件夹，双击 `vinciskin.exe`。没有安装程序，删除文件夹就是卸载。
 

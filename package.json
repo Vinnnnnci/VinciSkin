@@ -2,7 +2,7 @@
   "name": "vinciskin-ui",
   "private": true,
   "license": "GPL-3.0-or-later",
-  "version": "1.23.0",
+  "version": "1.23.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -22,7 +22,7 @@ use vinciskin_core::config::Config;
 use vinciskin_core::static_swap::{ChampionSwap, PackSwap};
 
 use crate::cn_auto::{AutoStatus, AutoSwapState};
-use crate::patcher::{PatcherState, PatcherStatus, LOADER_EXE_NAME};
+use crate::patcher::{ForcedStop, PatcherState, PatcherStatus, LOADER_EXE_NAME};
 
 /// Sent with every request, the way the other publishers are told who is asking.
 const USER_AGENT: &str = concat!("vinciskin/", env!("CARGO_PKG_VERSION"));
@@ -430,6 +430,16 @@ pub fn stop_cn_patcher(patcher: State<PatcherState>) -> IpcResult<()> {
 #[tauri::command]
 pub fn get_cn_patcher_status(patcher: State<PatcherState>) -> IpcResult<PatcherStatus> {
     IpcResult::ok(patcher.status())
+}
+
+/// End any loader that is still running, whatever this session believes about it.
+///
+/// A loader left behind by a crashed app, or by a VinciSkin folder someone deleted while it
+/// ran, keeps its hook in the next game League starts, and a game whose hook is broken does not
+/// start at all. This button exists for that state, so it does not ask the app first.
+#[tauri::command]
+pub fn force_stop_cn_loader(patcher: State<PatcherState>) -> IpcResult<ForcedStop> {
+    patcher.force_stop().into()
 }
 
 /// Follow the client's champ-select session and apply the skin it shows.

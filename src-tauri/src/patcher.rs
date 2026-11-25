@@ -17,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use fs_err as fs;
 use parking_lot::Mutex;
@@ -76,6 +77,20 @@ pub struct PatcherStatus {
     pub game_running: bool,
 }
 
+/// What a forced cleanup found and did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForcedStop {
+    /// Whether a loader was running at all.
+    pub found: bool,
+    /// Whether it is gone now.
+    pub killed: bool,
+    /// Whether ending it took an administrator prompt.
+    pub elevated: bool,
+    /// What is left, when it survived.
+    pub detail: Option<String>,
+}
+
 /// A process handle, kept so the session can be stopped again.
 ///
 /// The job is what makes a stop reach the loader: the process is the hidden
@@ -101,7 +116,9 @@ mod elevated {
         SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
-    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, TerminateProcess};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+    };
     use windows_sys::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
@@ -154,6 +171,48 @@ mod elevated {
             process: info.hProcess as isize,
             job: job as isize,
         })
+    }
+
+    /// Run `exe` elevated and wait for it to end, without keeping it in a job.
+    ///
+    /// A tool this app asks to remove something else is not its child: putting it in the loader's
+    /// job would end it the moment this process exits, before it did its work.
+    pub fn run_and_wait(exe: &str, args: &str) -> AppResult<()> {
+        let verb = wide("runas");
+        let file = wide(exe);
+        let params = wide(args);
+
+        // SAFETY: every pointer below outlives the call, and the struct is
+        // zeroed then filled the way `ShellExecuteExW` documents.
+        let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOCLOSEPROCESS;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = file.as_ptr();
+        info.lpParameters = params.as_ptr();
+        info.nShow = 0;
+
+        // SAFETY: `info` is a fully initialized SHELLEXECUTEINFOW.
+        let started = unsafe { ShellExecuteExW(&mut info) };
+        if started == 0 {
+            return Err(AppError::Other(format!(
+                "could not run {exe} elevated: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        if info.hProcess.is_null() {
+            return Err(AppError::Other(format!(
+                "{exe} ran but gave no process handle"
+            )));
+        }
+
+        // SAFETY: the handle came from `ShellExecuteExW` above, and is closed once.
+        unsafe {
+            WaitForSingleObject(info.hProcess, 10_000);
+            CloseHandle(info.hProcess);
+        }
+
+        Ok(())
     }
 
     /// Put the wrapper in a job that ends its children when it is terminated.
@@ -224,6 +283,10 @@ mod elevated {
         false
     }
     pub fn kill(_handle: Handle) {}
+
+    pub fn run_and_wait(_exe: &str, _args: &str) -> AppResult<()> {
+        Err(AppError::Other("elevation is Windows only".into()))
+    }
 }
 
 /// The processes the loader waits for and the one it is.
@@ -334,6 +397,8 @@ struct Inner {
     saw_attached: bool,
     saw_injected: bool,
     saw_game: bool,
+    /// Whether a loader this process did not start was reported, once, so the log says so.
+    saw_external: bool,
 }
 
 impl Default for Inner {
@@ -347,6 +412,7 @@ impl Default for Inner {
             saw_attached: false,
             saw_injected: false,
             saw_game: false,
+            saw_external: false,
         }
     }
 }
@@ -377,7 +443,18 @@ impl PatcherState {
         }
 
         let alive = inner.handle.is_some_and(elevated::alive);
-        if alive {
+
+        /* A loader started before this process, or by an earlier run of it, still serves the
+        overlay: `running` is about the loader being up, not about this process holding its
+        handle. Without this the status says "not running" while injection works, and the
+        button offers to start a second loader that `start` then refuses. */
+        let external = !alive && probe::loader_pid().is_some();
+        if external && !inner.saw_external {
+            inner.saw_external = true;
+            tracing::info!("the injection loader is running outside this session");
+        }
+
+        if alive || external {
             inner.status.running = true;
 
             if inner.status.error.is_some() {
@@ -390,6 +467,7 @@ impl PatcherState {
                 inner.status.state = Some("scanning".into());
             }
         } else {
+            inner.saw_external = false;
             inner.handle = None;
             inner.status.running = false;
             inner.status.state = inner.status.error.as_ref().map(|_| "failed".to_string());
@@ -401,9 +479,12 @@ impl PatcherState {
     /// Stop the loader.
     pub fn stop(&self) -> AppResult<()> {
         let mut inner = self.inner.lock();
-        let Some(handle) = inner.handle else {
+        let handle = inner.handle;
+        let external = handle.is_none() && probe::loader_pid().is_some();
+
+        if handle.is_none() && !external {
             return Err(AppError::Other("the patcher is not running".into()));
-        };
+        }
 
         /* The loader cannot unload what it injected, and a running game is one
         it either hooked or is about to, so ending it mid-game leaves the hook
@@ -415,7 +496,9 @@ impl PatcherState {
         }
 
         inner.handle = None;
-        elevated::kill(handle);
+        if let Some(handle) = handle {
+            elevated::kill(handle);
+        }
         if probe::loader_pid().is_some() && !probe::kill_loader() {
             tracing::warn!("the injection loader outlived its job");
         }
@@ -426,6 +509,63 @@ impl PatcherState {
         crate::logging::end_session();
         tracing::info!("injection loader stopped");
         Ok(())
+    }
+
+    /// End any injection loader, including one this process never held a handle on.
+    ///
+    /// A loader that outlived the app that started it - a crashed run, a folder deleted while
+    /// the process was up, a job it escaped - keeps its hook in whatever game it finds next,
+    /// and a game that starts under a broken hook does not start at all. Nothing about the
+    /// app's own state has to be right first, which is the point of the button.
+    pub fn force_stop(&self) -> AppResult<ForcedStop> {
+        let mut inner = self.inner.lock();
+
+        let pid = probe::loader_pid();
+        if pid.is_some() && probe::game_pid().is_some() {
+            return Err(AppError::Other(
+                "the game is still running - close it before stopping the loader".into(),
+            ));
+        }
+
+        inner.handle = None;
+        inner.status = PatcherStatus {
+            game_running: false,
+            ..PatcherStatus::default()
+        };
+        crate::logging::end_session();
+
+        let Some(pid) = pid else {
+            return Ok(ForcedStop {
+                found: false,
+                killed: false,
+                elevated: false,
+                detail: None,
+            });
+        };
+
+        tracing::warn!(pid, "ending an injection loader this session does not hold");
+
+        /* A loader at the same integrity ends on the first try, and only one that refuses
+        needs the prompt. */
+        if probe::kill_loader() && wait_for_exit(pid, Duration::from_secs(3)) {
+            return Ok(ForcedStop {
+                found: true,
+                killed: true,
+                elevated: false,
+                detail: None,
+            });
+        }
+
+        elevated::run_and_wait("taskkill.exe", &format!("/F /PID {pid} /T"))?;
+
+        let killed = wait_for_exit(pid, Duration::from_secs(5));
+
+        Ok(ForcedStop {
+            found: true,
+            killed,
+            elevated: true,
+            detail: (!killed).then(|| format!("process {pid} is still running")),
+        })
     }
 
     /// Start the loader over `overlay`, elevated.
@@ -510,8 +650,25 @@ impl PatcherState {
         inner.saw_attached = false;
         inner.saw_injected = false;
         inner.saw_game = false;
+        inner.saw_external = false;
         inner.handle = Some(handle);
         Ok(())
+    }
+}
+
+/// Wait until the loader `pid` is gone, or `timeout` passes.
+fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+
+    loop {
+        if probe::loader_pid() != Some(pid) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 

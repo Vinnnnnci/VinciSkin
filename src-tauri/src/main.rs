@@ -229,6 +229,7 @@ fn main() {
             commands::start_cn_patcher,
             commands::stop_cn_patcher,
             commands::get_cn_patcher_status,
+            commands::force_stop_cn_loader,
             // CN auto-swap (the watcher that reads the client's own session)
             commands::start_cn_auto_swap,
             commands::stop_cn_auto_swap,

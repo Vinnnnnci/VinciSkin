@@ -1,14 +1,21 @@
+import { BroomIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 
-import { Button, useToast } from "@/components";
+import { Button, Tooltip, useToast } from "@/components";
 import { errorMessage, m } from "@/i18n";
 import { api, type CnAutoStatus, type CnPatcherStatus, isOk, unwrap } from "@/lib/tauri";
+
+import { patcherErrorText } from "../patcherError";
 
 /** What the loader is doing, as the words a reader sees. */
 function injectLabel(status: CnPatcherStatus | null): string {
   if (!status) return m.cn_inject_idle_label();
-  if (status.error) return m.cn_inject_error_label({ detail: status.error });
-  if (!status.running) return m.cn_inject_idle_label();
+  if (status.error) return m.cn_inject_error_label({ detail: patcherErrorText(status.error) });
+  if (!status.running) {
+    /* A game that is already up cannot be injected, so the line says what that
+    means for the match in progress rather than offering a start that must fail. */
+    return status.gameRunning ? m.cn_inject_off_game_running_label() : m.cn_inject_idle_label();
+  }
   if (status.state === "injected") return m.cn_inject_injected_label();
   if (status.state === "attached") return m.cn_inject_attached_label();
   return m.cn_inject_scanning_label();
@@ -36,6 +43,7 @@ export function CnSessionControl() {
   const [injectBusy, setInjectBusy] = useState(false);
   const [skinBusy, setSkinBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const [forceBusy, setForceBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -72,7 +80,7 @@ export function CnSessionControl() {
       }
     } catch (error: unknown) {
       const title = injectRunning ? m.cn_inject_stop_failed_title() : m.cn_inject_failed_title();
-      toast.error(title, errorMessage(error));
+      toast.error(title, patcherErrorText(errorMessage(error)));
     } finally {
       setInjectBusy(false);
     }
@@ -124,7 +132,7 @@ export function CnSessionControl() {
       }
     } catch (error: unknown) {
       const title = skinRunning ? m.cn_auto_stop_failed_title() : m.cn_auto_failed_title();
-      toast.error(title, errorMessage(error));
+      toast.error(title, patcherErrorText(errorMessage(error)));
     } finally {
       setSkinBusy(false);
     }
@@ -142,12 +150,64 @@ export function CnSessionControl() {
     }
   }
 
+  /**
+   * Ends a loader whatever the app believes, which is the point: an orphaned one holds a hook
+   * the next game cannot start under, and by then VinciSkin's own state has usually lost track.
+   */
+  async function forceStop() {
+    setForceBusy(true);
+    try {
+      const result = unwrap(await api.cn.forceStopLoader());
+
+      if (!result.found) {
+        toast.success(m.cn_force_stop_none());
+        return;
+      }
+
+      if (result.killed) {
+        setPatcher({
+          running: false,
+          state: null,
+          error: null,
+          logPath: null,
+          gameRunning: false,
+        });
+        toast.success(
+          m.cn_force_stop_done(),
+          result.elevated ? m.cn_force_stop_done_elevated() : undefined,
+        );
+        return;
+      }
+
+      toast.error(
+        m.cn_force_stop_failed_title(),
+        result.detail ?? m.cn_force_stop_failed_description(),
+      );
+    } catch (error: unknown) {
+      toast.error(m.cn_force_stop_failed_title(), patcherErrorText(errorMessage(error)));
+    } finally {
+      setForceBusy(false);
+    }
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2" data-ui="CnSessionControl">
       <span className="text-sm text-surface-400">{injectLabel(patcher)}</span>
       <span className="text-sm text-surface-400">{followLabel(auto)}</span>
 
       <div className="ml-auto flex items-center gap-2">
+        <Tooltip content={m.cn_force_stop_hint()}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={forceBusy}
+            loading={forceBusy}
+            onClick={forceStop}
+            left={<BroomIcon className="h-4 w-4" weight="bold" />}
+          >
+            {m.cn_force_stop_action()}
+          </Button>
+        </Tooltip>
         <Button size="sm" variant="ghost" disabled={restoreBusy} onClick={restore}>
           {m.cn_auto_restore_action()}
         </Button>

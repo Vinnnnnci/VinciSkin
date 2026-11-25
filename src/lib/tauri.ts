@@ -362,6 +362,18 @@ export interface CnPatcherStatus {
   gameRunning: boolean;
 }
 
+/** What a forced cleanup of the injection loader found and did. */
+export interface CnForcedStop {
+  /** Whether a loader was running at all. */
+  found: boolean;
+  /** Whether it is gone now. */
+  killed: boolean;
+  /** Whether ending it took an administrator prompt. */
+  elevated: boolean;
+  /** What is left, when it survived. */
+  detail: string | null;
+}
+
 /** The skin the champ-select watcher last applied, while one is still shown. */
 export interface CnAutoApplied {
   championId: number;
@@ -807,6 +819,7 @@ export const api = {
     forgetSkinPack: (archive: string) => commands.forgetCnSkinPack(archive).then(toResult),
     startPatcher: () => invokeResult<null>("start_cn_patcher"),
     stopPatcher: () => invokeResult<null>("stop_cn_patcher"),
+    forceStopLoader: () => invokeResult<CnForcedStop>("force_stop_cn_loader"),
     patcherStatus: () => invokeResult<CnPatcherStatus>("get_cn_patcher_status"),
     startAutoSwap: () => invokeResult<null>("start_cn_auto_swap"),
     stopAutoSwap: () => invokeResult<null>("stop_cn_auto_swap"),

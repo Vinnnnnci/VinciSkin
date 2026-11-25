@@ -17,6 +17,7 @@ import {
   useHeroSwap,
   useRestoreCnSkin,
 } from "../api";
+import { patcherErrorText } from "../patcherError";
 import { type SkinCard, filterCards, qualityLabel, skinCards } from "../skins";
 
 interface CnSkinGridProps {
@@ -58,7 +59,7 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
     }
 
     if (status.value.error) {
-      toast.error(m.cn_inject_failed_title(), status.value.error);
+      toast.error(m.cn_inject_failed_title(), patcherErrorText(status.value.error));
       return;
     }
 
@@ -81,9 +82,13 @@ export function CnSkinGrid({ hero, quality, onlyApplied }: CnSkinGridProps) {
           onClick: () => {
             void api.cn.startPatcher().then((result) => {
               if (!isOk(result)) {
-                toast.error(m.cn_inject_failed_title(), errorMessage(result.error), {
-                  actions: errorActions(result.error),
-                });
+                toast.error(
+                  m.cn_inject_failed_title(),
+                  patcherErrorText(errorMessage(result.error)),
+                  {
+                    actions: errorActions(result.error),
+                  },
+                );
               }
             });
           },

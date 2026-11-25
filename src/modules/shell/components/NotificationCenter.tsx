@@ -7,7 +7,7 @@ import { m } from "@/i18n";
 import { type Notification, useNotificationsStore } from "@/stores/notifications";
 import { twMerge } from "@/utils";
 
-import { cellBase, cellInactive } from "./cells";
+import { cellInactive, cellLabeled } from "./cells";
 
 const typeIcons: Record<ToastType, React.ReactNode> = {
   success: <CircleCheck className="h-4 w-4 text-success-text" />,
@@ -70,14 +70,17 @@ export function NotificationCenter() {
     >
       <Popover.Trigger
         aria-label={m.shell_notifications_label()}
-        className={twMerge(cellBase, cellInactive, "relative")}
+        className={twMerge(cellLabeled, cellInactive)}
       >
-        <Bell className="h-4 w-4" />
-        {unreadCount > 0 && (
-          <span className="absolute top-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-500 px-1 text-[0.625rem] font-bold text-on-accent">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        )}
+        <span className="relative">
+          <Bell className="h-4 w-4" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-500 px-1 text-[0.625rem] font-bold text-on-accent">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </span>
+        <span className="hidden text-xs md:inline">{m.shell_notifications_label()}</span>
       </Popover.Trigger>
 
       <Popover.Portal>

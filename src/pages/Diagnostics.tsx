@@ -70,12 +70,12 @@ export function Diagnostics() {
         <header className="flex shrink-0 items-center border-b border-surface-700/50 px-4 select-none">
           <h1 className="flex shrink-0 items-center gap-2 text-sm font-semibold text-surface-200">
             <StethoscopeIcon className="h-4 w-4 text-accent-400" />
-            Diagnostics
+            {m.shell_diagnostics_label()}
           </h1>
           <Separator orientation="vertical" className="mx-2 h-4" />
           <Tabs.List className="border-b-0">
-            <Tabs.Tab value="games">Games</Tabs.Tab>
-            <Tabs.Tab value="system">System</Tabs.Tab>
+            <Tabs.Tab value="games">{m.diagnostics_tab_games()}</Tabs.Tab>
+            <Tabs.Tab value="system">{m.diagnostics_tab_system()}</Tabs.Tab>
           </Tabs.List>
         </header>
 
@@ -99,23 +99,29 @@ function SystemTab() {
     if (!report) return;
     navigator.clipboard
       .writeText(reportToText(report))
-      .then(() => toast.success("Copied", "Diagnostic report copied to clipboard"))
-      .catch(() => toast.error("Copy failed", "Could not access the clipboard"));
+      .then(() =>
+        toast.success(
+          m.diagnostics_copy_report_copied_title(),
+          m.diagnostics_copy_report_copied_description(),
+        ),
+      )
+      .catch(() =>
+        toast.error(m.diagnostics_copy_failed_title(), m.diagnostics_copy_failed_description()),
+      );
   }
 
   return (
     <div data-ui="SystemTab" className="mx-auto w-full max-w-5xl space-y-6 p-6">
       <header className="flex items-start justify-between gap-4 select-none">
         <div>
-          <p className="text-sm text-surface-400">
-            Checks the most common reasons the patcher fails to load mods. Re-run after changing
-            settings or a Windows update. All checks are read-only — fixes are shown as commands you
-            can copy and run in an elevated terminal.
-          </p>
+          <p className="text-sm text-surface-400">{m.diagnostics_system_intro()}</p>
           <p className="mt-1 text-sm text-surface-400">{m.support_report_diagnostics_hint()}</p>
           {report && (
             <p className="mt-1 text-xs text-surface-500">
-              Last run: {formatGeneratedAt(report.generatedAt)} · VinciSkin v{report.appVersion}
+              {m.diagnostics_last_run_label({
+                time: formatGeneratedAt(report.generatedAt),
+                version: report.appVersion,
+              })}
             </p>
           )}
         </div>
@@ -135,7 +141,7 @@ function SystemTab() {
             disabled={!report}
             left={<ClipboardTextIcon weight="bold" className="h-4 w-4" />}
           >
-            Copy report
+            {m.diagnostics_copy_report_action()}
           </Button>
           <Button
             variant="filled"
@@ -144,14 +150,14 @@ function SystemTab() {
             loading={diagnostics.isFetching}
             left={<ArrowClockwiseIcon weight="bold" className="h-4 w-4" />}
           >
-            {diagnostics.isFetching ? "Running…" : "Re-run"}
+            {diagnostics.isFetching ? m.diagnostics_running_action() : m.diagnostics_rerun_action()}
           </Button>
         </div>
       </header>
 
       {diagnostics.isError && (
-        <AlertBox variant="error" title="Diagnostics failed to run">
-          {diagnostics.error ? errorSummary(diagnostics.error) : "Unknown error"}
+        <AlertBox variant="error" title={m.diagnostics_failed_title()}>
+          {diagnostics.error ? errorSummary(diagnostics.error) : m.diagnostics_unknown_error()}
         </AlertBox>
       )}
 

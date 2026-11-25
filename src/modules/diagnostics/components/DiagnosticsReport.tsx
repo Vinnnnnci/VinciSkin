@@ -1,37 +1,47 @@
 import { useMemo } from "react";
 
+import { m } from "@/i18n";
 import type { Category, Check, DiagnosticReport, Severity } from "@/lib/tauri";
 
 import { CheckRow } from "./CheckRow";
 
 const CATEGORY_ORDER: Category[] = ["system", "manager", "league", "patcher", "storage", "library"];
 
-const CATEGORY_LABELS: Record<Category, { title: string; description: string }> = {
-  system: {
-    title: "System",
-    description: "Windows version, UAC, long-paths support",
-  },
-  manager: {
-    title: "VinciSkin",
-    description: "Manager elevation, conflicting processes",
-  },
-  league: {
-    title: "League installation",
-    description: "Install path, writability, compatibility flags",
-  },
-  patcher: {
-    title: "Patcher",
-    description: "DLL presence, signature, file lock state",
-  },
-  storage: {
-    title: "Mod storage",
-    description: "Storage path, free space, drive type",
-  },
-  library: {
-    title: "Library",
-    description: "Mod library index integrity",
-  },
-};
+/** What a section of the report is called, in the reader's language. */
+function categoryCopy(category: Category): { title: string; description: string } {
+  switch (category) {
+    case "system":
+      return {
+        title: m.diagnostics_category_system_title(),
+        description: m.diagnostics_category_system_description(),
+      };
+    case "manager":
+      return {
+        title: m.diagnostics_category_manager_title(),
+        description: m.diagnostics_category_manager_description(),
+      };
+    case "league":
+      return {
+        title: m.diagnostics_category_league_title(),
+        description: m.diagnostics_category_league_description(),
+      };
+    case "patcher":
+      return {
+        title: m.diagnostics_category_patcher_title(),
+        description: m.diagnostics_category_patcher_description(),
+      };
+    case "storage":
+      return {
+        title: m.diagnostics_category_storage_title(),
+        description: m.diagnostics_category_storage_description(),
+      };
+    case "library":
+      return {
+        title: m.diagnostics_category_library_title(),
+        description: m.diagnostics_category_library_description(),
+      };
+  }
+}
 
 const SEVERITY_ORDER: Severity[] = ["bad", "warn", "info", "ok"];
 
@@ -47,7 +57,7 @@ export function DiagnosticsReportView({ report }: DiagnosticsReportProps) {
       {CATEGORY_ORDER.map((cat) => {
         const checks = grouped.get(cat);
         if (!checks || checks.length === 0) return null;
-        const labels = CATEGORY_LABELS[cat];
+        const labels = categoryCopy(cat);
         return (
           <section key={cat} className="space-y-2">
             <header className="px-1">
@@ -83,10 +93,10 @@ function CountsHeader({ checks }: { checks: Check[] }) {
   for (const c of checks) counts[c.severity]++;
 
   const items: { sev: Severity; label: string; cls: string }[] = [
-    { sev: "bad", label: "Issues", cls: "text-danger-text" },
-    { sev: "warn", label: "Warnings", cls: "text-warning-text" },
-    { sev: "ok", label: "Passing", cls: "text-success-text" },
-    { sev: "info", label: "Info", cls: "text-info-text" },
+    { sev: "bad", label: m.diagnostics_counts_bad(), cls: "text-danger-text" },
+    { sev: "warn", label: m.diagnostics_counts_warn(), cls: "text-warning-text" },
+    { sev: "ok", label: m.diagnostics_counts_ok(), cls: "text-success-text" },
+    { sev: "info", label: m.diagnostics_counts_info(), cls: "text-info-text" },
   ];
 
   return (

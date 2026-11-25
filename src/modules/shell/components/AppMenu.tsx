@@ -6,7 +6,7 @@ import { m } from "@/i18n";
 import { api, unwrap } from "@/lib/tauri";
 import { twMerge } from "@/utils";
 
-import { cellActive, cellBase, cellInactive } from "./cells";
+import { cellActive, cellInactive, cellLabeled } from "./cells";
 
 /** The titlebar actions that report no state of their own, behind one cell. */
 export function AppMenu() {
@@ -32,9 +32,10 @@ export function AppMenu() {
         <Menu.Trigger
           aria-label={m.shell_menu_label()}
           data-ui="TitleBar:appMenu"
-          className={twMerge(cellBase, isOpen ? cellActive : cellInactive)}
+          className={twMerge(cellLabeled, isOpen ? cellActive : cellInactive)}
         >
           <DotsThreeVerticalIcon weight="bold" className="h-4 w-4" />
+          <span className="hidden text-xs md:inline">{m.shell_menu_label()}</span>
         </Menu.Trigger>
       </Tooltip>
 

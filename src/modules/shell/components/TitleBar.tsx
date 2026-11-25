@@ -29,7 +29,7 @@ import { type AppMark, useAppMark, useRollAppMark } from "@/stores";
 import { twMerge } from "@/utils";
 
 import { AppMenu } from "./AppMenu";
-import { cellActive, cellBase, cellInactive, iconLiftClass } from "./cells";
+import { cellActive, cellInactive, cellLabeled, iconLiftClass } from "./cells";
 import { NotificationCenter } from "./NotificationCenter";
 
 const navItems = [{ to: "/cn", label: m.cn_nav_label(), icon: SparkleIcon, exact: false }] as const;
@@ -240,8 +240,8 @@ export function TitleBar({ title = "VinciSkin", appInfo }: TitleBarProps) {
           <Tooltip content={diagnosticsTooltip(pendingIncidents)}>
             <Link
               to="/diagnostics"
-              activeProps={{ className: twMerge(cellBase, cellActive) }}
-              inactiveProps={{ className: twMerge(cellBase, cellInactive) }}
+              activeProps={{ className: twMerge(cellLabeled, cellActive) }}
+              inactiveProps={{ className: twMerge(cellLabeled, cellInactive) }}
               aria-label={diagnosticsTooltip(pendingIncidents)}
               data-ui="TitleBar:diagnostics"
             >
@@ -257,18 +257,20 @@ export function TitleBar({ title = "VinciSkin", appInfo }: TitleBarProps) {
                   />
                 )}
               </span>
+              <span className="hidden text-xs md:inline">{m.shell_diagnostics_label()}</span>
             </Link>
           </Tooltip>
 
           <Tooltip content={m.shell_settings_label()}>
             <Link
               to="/settings"
-              activeProps={{ className: twMerge(cellBase, cellActive) }}
-              inactiveProps={{ className: twMerge(cellBase, cellInactive) }}
+              activeProps={{ className: twMerge(cellLabeled, cellActive) }}
+              inactiveProps={{ className: twMerge(cellLabeled, cellInactive) }}
               aria-label={m.shell_settings_label()}
               data-ui="TitleBar:settings"
             >
               <GearIcon className="h-4 w-4" />
+              <span className="hidden text-xs md:inline">{m.shell_settings_label()}</span>
             </Link>
           </Tooltip>
 

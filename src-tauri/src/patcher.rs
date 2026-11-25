@@ -126,11 +126,27 @@ mod elevated {
     /// The exit code a process still running reports (`STILL_ACTIVE`).
     const STILL_ACTIVE: u32 = 259;
 
+    /// `ERROR_CANCELLED`: the user closed the elevation prompt rather than answering it.
+    const ERROR_CANCELLED: i32 = 1223;
+
     fn wide(text: &str) -> Vec<u16> {
         std::ffi::OsStr::new(text)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect()
+    }
+
+    /// Why a `runas` launch did not start, as the sentence the UI shows.
+    ///
+    /// The OS text is localised, so a cancelled prompt is named from its code rather than from
+    /// whatever the system's language words it as.
+    fn prompt_failure(exe: &str) -> AppError {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_CANCELLED) {
+            return AppError::Other("the administrator prompt was cancelled".into());
+        }
+
+        AppError::Other(format!("could not run {exe} elevated: {error}"))
     }
 
     /// Launch `exe` with `args` through the `runas` verb, answering its handle.
@@ -154,10 +170,7 @@ mod elevated {
         // SAFETY: `info` is a fully initialized SHELLEXECUTEINFOW.
         let started = unsafe { ShellExecuteExW(&mut info) };
         if started == 0 {
-            return Err(AppError::Other(format!(
-                "could not start the loader elevated: {}",
-                std::io::Error::last_os_error()
-            )));
+            return Err(prompt_failure(super::LOADER_EXE_NAME));
         }
         if info.hProcess.is_null() {
             return Err(AppError::Other(
@@ -195,10 +208,7 @@ mod elevated {
         // SAFETY: `info` is a fully initialized SHELLEXECUTEINFOW.
         let started = unsafe { ShellExecuteExW(&mut info) };
         if started == 0 {
-            return Err(AppError::Other(format!(
-                "could not run {exe} elevated: {}",
-                std::io::Error::last_os_error()
-            )));
+            return Err(prompt_failure(exe));
         }
         if info.hProcess.is_null() {
             return Err(AppError::Other(format!(

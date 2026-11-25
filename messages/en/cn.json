@@ -27,6 +27,7 @@
   "cn_error_loader_dll_missing": "The loader's DLL is missing, most likely removed by an antivirus. Reinstalling VinciSkin puts it back.",
   "cn_error_loader_not_running": "Injection is not running.",
   "cn_error_loader_running": "Another injection loader is already running. Stop it first.",
+  "cn_error_uac_cancelled": "You cancelled the administrator prompt, so nothing was changed.",
   "cn_force_stop_action": "Clean up injection",
   "cn_force_stop_done": "Loader ended. League starts on its own again.",
   "cn_force_stop_done_elevated": "Ended with administrator rights",

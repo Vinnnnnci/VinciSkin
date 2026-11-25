@@ -27,6 +27,7 @@
   "cn_error_loader_dll_missing": "注入器的 DLL 不见了，多半被安全软件删了。重装一次 VinciSkin 就能补回来。",
   "cn_error_loader_not_running": "注入器没在运行。",
   "cn_error_loader_running": "已经有一个注入器在跑了，先把它停掉。",
+  "cn_error_uac_cancelled": "你取消了管理员授权，什么都没改。",
   "cn_force_stop_action": "清理残留注入",
   "cn_force_stop_done": "注入器已结束，League 可以正常启动了。",
   "cn_force_stop_done_elevated": "已用管理员权限结束",

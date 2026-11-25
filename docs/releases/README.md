@@ -46,3 +46,22 @@ as a dependency migration.
 A `Known Issues` section beats silence where a fix is partial. Say what still
 bites and what a user can safely ignore, so the release answers the question
 before it reaches the issue tracker.
+
+## The closing ask
+
+Every release ends with the sponsorship block, after `Known Issues`:
+
+```markdown
+### 支持
+
+VinciSkin 免费、开源，没有付费功能。如果它帮到你，可以请我喝杯奶茶：
+
+**[❤️ 去爱发电赞助 →](https://ifdian.net/a/Vinnnnnci)**
+
+不赞助也完全没关系，点个 Star、推荐给打游戏的朋友，同样是在帮我。
+```
+
+A release body is the one page someone reaches from a download link, so the ask
+belongs in the file rather than in a manual step after publishing. `1.23.1.md`
+now carries it, and a release body published without it needs the same block
+appended by hand.

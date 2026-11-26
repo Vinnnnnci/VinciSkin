@@ -4337,7 +4337,7 @@
     },
     {
       "name": "vinciskin",
-      "version": "1.23.1",
+      "version": "1.23.2",
       "licenses": [
         65
       ]
@@ -4366,6 +4366,13 @@
     },
     {
       "name": "vinciskin-game",
+      "version": "0.1.0",
+      "licenses": [
+        65
+      ]
+    },
+    {
+      "name": "vinciskin-injector",
       "version": "0.1.0",
       "licenses": [
         65

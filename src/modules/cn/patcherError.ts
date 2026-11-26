@@ -17,5 +17,13 @@ export function patcherErrorText(detail: string): string {
   if (text.includes("the patcher is not running")) return m.cn_error_loader_not_running();
   if (text.includes("already running")) return m.cn_error_loader_running();
 
+  /* What the host reports for itself, before the DLL is in the game. */
+  if (text.includes("no game window answered")) return m.cn_error_game_window_missing();
+  if (text.includes("timeout out while waiting for init")) return m.cn_error_hook_timeout();
+  if (text.includes("failed to create hook")) return m.cn_error_hook_refused();
+  if (text.includes("cannot load") || text.includes("does not export")) {
+    return m.cn_error_injector_load();
+  }
+
   return detail;
 }

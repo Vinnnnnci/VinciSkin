@@ -1,19 +1,21 @@
-//! Drives the cslol injection loader (`cslol-inj.exe`).
+//! Drives the injection host (`vinciskin-inj.exe`) and the cslol legacy DLL.
 //!
 //! The Chinese client's game runs at high integrity, and its module layout
 //! breaks the bundled ltk patcher's integrity hook (`.rdata section not found`),
 //! which aborts that DLL's init before its overlay hook is installed. cslol's
-//! legacy loader has no such hook: it hooks `CreateFileA` and redirects the
-//! game's WAD reads into the overlay, so it is the loader used here.
+//! legacy DLL has no such hook: it hooks `CreateFileA` and redirects the game's
+//! WAD reads into the overlay, so it is the loader used here.
 //!
-//! It is launched elevated (`runas`), because a process at a lower integrity
-//! level cannot hook the game (`Win32=5`). The process handle is kept so the
-//! session can be stopped again, which a lower-integrity process could not do
-//! with a fresh handle.
+//! The host is started elevated (`runas`), because a process at a lower
+//! integrity level cannot hook the game (`Win32=5`). The process handle is kept
+//! so the session can be stopped again, which a lower-integrity process could
+//! not do with a fresh handle.
 //!
-//! The loader's console is hidden, so its output is redirected to a log file.
-//! `status` reads that file and only reports `injected` once the DLL says its
-//! initialization entry was reached.
+//! `cslol-inj.exe` chose the thread to hook by window title, and landed on
+//! threads that never pump, so the host is ours: it only offers a window of
+//! `League of Legends.exe` that answers, then asks the DLL to hook that thread.
+//! Its console is hidden, so its output is redirected to a log file that
+//! `status` reads back.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,13 +27,15 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
-/// The bundled loader host.
-pub const LOADER_EXE_NAME: &str = "cslol-inj.exe";
-/// The bundled loader DLL, loaded from beside the host.
+/// The injection host this build starts.
+pub const LOADER_EXE_NAME: &str = "vinciskin-inj.exe";
+/// The cslol legacy DLL, loaded from beside the host and injected from there.
 pub const LOADER_DLL_NAME: &str = "cslol-dll-legacy.dll";
+/// The host an earlier build shipped, which a leftover of is still ended here.
+const LEGACY_LOADER_EXE_NAME: &str = "cslol-inj.exe";
 
 /// The loader pair, embedded so a release build is one file.
-const EMBEDDED_LOADER_EXE: &[u8] = include_bytes!("../resources/cslol-inj.exe");
+const EMBEDDED_LOADER_EXE: &[u8] = include_bytes!("../resources/vinciskin-inj.exe");
 const EMBEDDED_LOADER_DLL: &[u8] = include_bytes!("../resources/cslol-dll-legacy.dll");
 
 /// The longest loader line a status carries.
@@ -320,9 +324,10 @@ mod probe {
     /// A loader process, whether or not this app started it.
     ///
     /// A loader left behind by a crashed or replaced app still injects, so a
-    /// second one beside it would hook the game twice.
+    /// second one beside it would hook the game twice. The host this build
+    /// starts is named first, and the one older builds shipped after it.
     pub fn loader_pid() -> Option<u32> {
-        find(super::LOADER_EXE_NAME)
+        find(super::LOADER_EXE_NAME).or_else(|| find(super::LEGACY_LOADER_EXE_NAME))
     }
 
     /// End the loader, which a `cmd` wrapper's handle does not reach.
@@ -624,7 +629,10 @@ impl PatcherState {
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
         let log_path = log_dir.join(format!("loader-{stamp}.log"));
         let script_path = log_dir.join("loader-run.cmd");
-        fs::write(&script_path, loader_script(loader_exe, overlay, &log_path))?;
+        fs::write(
+            &script_path,
+            loader_script(loader_exe, &dll, overlay, &log_path),
+        )?;
 
         let command = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
         let arguments = format!("/c call \"{}\"", script_path.display());
@@ -682,16 +690,17 @@ fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
     }
 }
 
-/// The batch file that redirects the loader's console to its log.
+/// The batch file that redirects the host's console to its log.
 ///
 /// `cmd` expands `%` in a batch line even inside quotes, so a path that holds
 /// one is written doubled.
-fn loader_script(loader: &Path, overlay: &Path, log: &Path) -> String {
+fn loader_script(loader: &Path, dll: &Path, overlay: &Path, log: &Path) -> String {
     let path = |value: &Path| value.to_string_lossy().replace('%', "%%");
 
     format!(
-        "@echo off\r\n\"{}\" \"{}\" > \"{}\" 2>&1\r\nexit /b\r\n",
+        "@echo off\r\n\"{}\" --dll \"{}\" --overlay \"{}\" > \"{}\" 2>&1\r\nexit /b\r\n",
         path(loader),
+        path(dll),
         path(overlay),
         path(log)
     )
@@ -720,52 +729,58 @@ fn refresh_from_log(inner: &mut Inner) {
     }
 }
 
-/// Fold one loader line into the session state.
+/// Fold one host line into the session state.
+///
+/// The host prefixes its own progress with `[inj]` and everything the DLL
+/// logged in the game process with `[dll]`. Only those two prefixes carry
+/// meaning, so a line from anywhere else is left in the log alone: the host
+/// prints a diagnostic block before it decides anything, and reading that as
+/// the failure is how a machine that injected fine once showed an error.
 fn apply_loader_line(inner: &mut Inner, line: &str) {
     let text = line.trim();
     if text.is_empty() {
         return;
     }
 
-    let lower = text.to_ascii_lowercase();
-
-    if is_loader_failure(&lower) {
-        tracing::warn!(target: "patcher", loader = %text, "the injection loader reported a failure");
-        inner.status.error = Some(clip(text, MAX_LOADER_ERROR));
-        inner.status.state = Some("failed".into());
-        return;
-    }
-
-    if lower.contains("dll initialization entry acknowledged") || lower.contains("init done") {
-        tracing::info!(target: "patcher", "the injection DLL acknowledged its initialization");
-        inner.saw_injected = true;
-        inner.status.state = Some("injected".into());
-        inner.status.error = None;
-        return;
-    }
-
-    if lower.contains("[diag] target pid=") || lower.contains("waiting for game to exit") {
-        inner.saw_attached = true;
-        if !inner.saw_injected {
-            inner.status.state = Some("attached".into());
+    if let Some(rest) = text.strip_prefix("[inj] ") {
+        if let Some(error) = rest.strip_prefix("failed: ") {
+            record_failure(inner, error);
+        } else if rest == "injected" || rest.starts_with("dll acknowledged") {
+            inner.saw_injected = true;
+            inner.status.state = Some("injected".into());
+        } else if rest.starts_with("game found") {
+            inner.saw_attached = true;
+            if !inner.saw_injected {
+                inner.status.state = Some("attached".into());
+            }
         }
+        return;
+    }
+
+    if let Some(rest) = text.strip_prefix("[dll] ") {
+        if let Some(error) = rest.strip_prefix("error: ") {
+            record_failure(inner, error);
+        } else if rest.contains("Init done!") {
+            inner.saw_injected = true;
+            inner.status.error = None;
+            inner.status.state = Some("injected".into());
+        }
+        return;
+    }
+
+    /* A host that died before printing its verdict says so only here, and a
+    silent "scanning" for a process that is gone is worse than the crash text. */
+    if text.contains("panicked at") {
+        record_failure(inner, text);
     }
 }
 
-/// Whether a loader line names a failure.
-fn is_loader_failure(lower: &str) -> bool {
-    [
-        "failed to",
-        "failed;",
-        "timeout out",
-        "no profile path",
-        "invalid profile path",
-        "loaded_dll=not loaded",
-        "could not ",
-        "error:",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
+/// Put `error` on the session, cut to what a status line carries.
+fn record_failure(inner: &mut Inner, error: &str) {
+    let error = clip(error, MAX_LOADER_ERROR);
+    tracing::warn!(target: "patcher", loader = %error, "the injection host reported a failure");
+    inner.status.error = Some(error);
+    inner.status.state = Some("failed".into());
 }
 
 /// `text`, cut to `max` characters on a character boundary.

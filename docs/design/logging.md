@@ -837,11 +837,14 @@ P0 一周内可完成。P0 完成后，即使不做 P2，也能让朋友把 `boo
 
 ```
 选皮肤 -> overlay_apply 写 <storage>/overlay/DATA/FINAL/<Champion>.wad.client
-       -> 启动 cslol-inj.exe（管理员），参数是 overlay 目录
-       -> cslol-dll-legacy.dll 注入 League of Legends.exe
+       -> 启动 vinciskin-inj.exe（管理员），参数是 dll 路径和 overlay 目录
+       -> 等 League of Legends.exe 的窗口能响应消息，取它的线程 id
+       -> cslol-dll-legacy.dll 用这个线程注入 League of Legends.exe
        -> DLL hook CreateFileA，把游戏的 WAD 读取重定向到 overlay
        -> 游戏读 champion archive，看到皮肤
 ```
+
+宿主是自己写的（ADR-0060）：`cslol-inj.exe` 按窗口标题在整台机器上找，可能挂到不处理消息的线程上，Windows 10 上就表现为 32 秒超时或者 `OpenThread … Win32=87`。
 
 每一步都可能失败。现在的界面只报“注入中/已注入/已应用”，不报“游戏有没有真的读到 overlay”。
 

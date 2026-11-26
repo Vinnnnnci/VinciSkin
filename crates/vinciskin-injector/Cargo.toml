@@ -1,0 +1,20 @@
+[package]
+name = "vinciskin-injector"
+version = "0.1.0"
+description = "Injection host for VinciSkin: finds the game window and asks the cslol DLL to hook it"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "vinciskin-inj"
+path = "src/main.rs"
+
+[dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
